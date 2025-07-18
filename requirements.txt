@@ -1,0 +1,11 @@
+streamlit
+pandas
+yfinance
+openpyxl
+matplotlib
+seaborn
+pytz
+scikit-learn
+plotly
+numpy
+fredapi
