@@ -22,7 +22,7 @@ def fetch_friday_closes(symbol, weeks):
     start_date, end_date = weeks[0][0], weeks[-1][1]
     df = yf.download(symbol, start=start_date, end=end_date + timedelta(days=1), interval="1d", progress=False)
     if df.empty or "Close" not in df.columns:
-        return None
+        return [np.nan] * len(weeks)
     closes = []
     for monday, friday in weeks:
         week_data = df[(df.index >= monday) & (df.index <= friday)]
@@ -32,7 +32,7 @@ def fetch_friday_closes(symbol, weeks):
         else:
             fallback = week_data["Close"].dropna()
             closes.append(float(round(fallback.iloc[-1], 3)) if not fallback.empty else np.nan)
-    return closes if sum(np.isnan(closes)) == 0 else None
+    return closes
 
 def fetch_current_week_close(symbol, current_week_start):
     today = datetime.today()
@@ -66,10 +66,7 @@ if uploaded_file:
             for sym in symbols:
                 closes = fetch_friday_closes(sym, weeks)
                 current = fetch_current_week_close(sym, current_week_start)
-                if closes is not None and len(closes) == 6:
-                    all_data[sym] = closes + [current]
-                else:
-                    st.warning(f"⚠️ Ticker **{sym}**: insufficient data, skipped.")
+                all_data[sym] = closes + [current]
 
             if all_data:
                 labels = [f"{m.strftime('%b %d')}→{f.strftime('%b %d')}" for m, f in weeks]
