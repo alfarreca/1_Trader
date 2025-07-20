@@ -13,7 +13,7 @@ import numpy as np
 # ========== CONFIGURATION ==========
 MAX_WORKERS = 8
 REQUEST_DELAY = (0.5, 2.0)
-CACHE_TTL = 3600 * 12
+CACHE_TTL = 3600 * 12  # 12 hours
 MAX_RETRIES = 3
 TIMEZONE = 'America/New_York'
 
@@ -37,12 +37,23 @@ def get_ticker_data(_ticker, exchange, yf_symbol):
     try:
         ticker_obj = yf.Ticker(yf_symbol)
         hist = safe_yfinance_fetch(ticker_obj)
+        if hist.empty or len(hist) < 50:
+            return None
         current_price = hist['Close'].iloc[-1]
-        return {"Symbol": _ticker, "Price": round(current_price, 2)}
+        five_day_change = ((current_price/hist['Close'].iloc[-5]-1)*100) if len(hist) >= 5 else None
+        twenty_day_change = ((current_price/hist['Close'].iloc[-20]-1)*100) if len(hist) >= 20 else None
+        return {
+            "Symbol": _ticker,
+            "Exchange": exchange,
+            "Price": round(current_price, 2),
+            "5D_Change": round(five_day_change, 1) if five_day_change else None,
+            "20D_Change": round(twenty_day_change, 1) if twenty_day_change else None,
+        }
     except:
         return None
 
 def main():
+    st.set_page_config(page_title="S&P 500 Momentum Scanner", layout="wide")
     st.title("S&P 500 Momentum Scanner")
 
     uploaded_file = st.file_uploader("Upload Excel file with tickers", type="xlsx")
