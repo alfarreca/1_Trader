@@ -1,3 +1,7 @@
+from pathlib import Path
+
+# Full corrected script after code state reset, with proper Total Return % in Ticker Scores
+final_script = """
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -153,7 +157,7 @@ if uploaded_file:
                     scores["Momentum"] = (norm_df.iloc[:, -1] - norm_df.iloc[:, -2]).fillna(0)
                     scores["Volatility"] = norm_df.std(axis=1).fillna(0)
                     scores["Trend"] = norm_df.apply(lambda row: sum(row.diff().fillna(0) > 0), axis=1)
-                    scores["Total Return"] = (norm_df.iloc[:, -1] - norm_df.iloc[:, 0]).fillna(0)
+                    scores["Total Return"] = ((norm_df.iloc[:, -1] - norm_df.iloc[:, 0]) / norm_df.iloc[:, 0] * 100).fillna(0)
                     scores["All-Around"] = scores.sum(axis=1)
                     st.dataframe(scores.round(2).sort_values("All-Around", ascending=False), use_container_width=True)
 
@@ -170,3 +174,9 @@ if uploaded_file:
                     st.subheader("📉 Volatility (Standard Deviation of Weekly % Change)")
                     volatility = weekly_pct.std(axis=1).fillna(0)
                     st.dataframe(volatility.rename("Volatility (%)").round(2).reset_index(), use_container_width=True)
+"""
+
+# Save to file
+final_script_path = "/mnt/data/Price_Tracker22_TOP20_FINAL.py"
+Path(final_script_path).write_text(final_script)
+final_script_path
