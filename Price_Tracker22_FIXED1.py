@@ -1,3 +1,7 @@
+from pathlib import Path
+
+# Updated script with corrected hovertemplate formatting
+fixed_script = """
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -92,7 +96,7 @@ if uploaded_file:
                     normed = normed.iloc[:, :-1]
                     labels = labels[:-1]
 
-                # 🔍 Top 20 logic
+                # Top 20 logic
                 start_values = norm_df.iloc[:, 0]
                 last_values = norm_df.iloc[:, -1]
                 total_pct_change = ((last_values - start_values) / start_values) * 100
@@ -119,11 +123,8 @@ if uploaded_file:
                             customdata=pct_change_from_start.loc[sym].values.reshape(-1, 1),
                             mode='lines+markers',
                             name=sym,
-                            hovertemplate=(
-                                f"<b>{sym}</b><br>"
-                                + "Price: %{y:.2f}<br>"
-                                + "Change: %{customdata[0]:.2f}%"
-                            )
+                            hovertemplate="<b>%{text}</b><br>Price: %{y:.2f}<br>Change: %{customdata[0]:.2f}%",
+                            text=[sym] * len(labels)
                         ))
                     fig.update_layout(hovermode="x unified", height=500, title="Price Trend — Top 20 by Return")
                     st.plotly_chart(fig, use_container_width=True)
@@ -141,7 +142,8 @@ if uploaded_file:
                             customdata=pct_change_from_start.loc[sym].values.reshape(-1, 1),
                             mode="lines",
                             name=label_name,
-                            hovertemplate=(f"<b>{sym}</b><br>Normalized: %{y:.2f}<br>Change: %{customdata[0]:.2f}%")
+                            text=[label_name] * len(labels),
+                            hovertemplate="<b>%{text}</b><br>Normalized: %{y:.2f}<br>Change: %{customdata[0]:.2f}%"
                         ))
                     norm_chart.update_layout(hovermode="closest", height=500, title="Normalized — Top 20 by Return")
                     st.plotly_chart(norm_chart, use_container_width=True)
@@ -173,3 +175,9 @@ if uploaded_file:
                     st.subheader("📉 Volatility (Standard Deviation of Weekly % Change)")
                     volatility = weekly_pct.std(axis=1).fillna(0)
                     st.dataframe(volatility.rename("Volatility (%)").round(2).reset_index(), use_container_width=True)
+"""
+
+# Save script to file
+script_path = "/mnt/data/Price_Tracker22_TOP20_FIXED.py"
+Path(script_path).write_text(fixed_script)
+script_path
