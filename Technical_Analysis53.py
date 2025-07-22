@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Styles ---
+# --- Styling ---
 st.markdown("""
     <style>
     .main { max-width: 1200px; }
@@ -46,8 +46,7 @@ with st.sidebar:
 # --- Utility Functions ---
 def fetch_live_price(ticker):
     try:
-        info = yf.Ticker(ticker)
-        return info.fast_info['last_price']
+        return yf.Ticker(ticker).fast_info['last_price']
     except Exception:
         return None
 
@@ -90,7 +89,11 @@ def load_stock_data(ticker, start_date, end_date):
 def calculate_indicators(df):
     if df is None or df.empty:
         return df
+
     close = df['Close']
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
     if show_sma:
         df['SMA_20'] = ta.trend.sma_indicator(close, 20)
         df['SMA_50'] = ta.trend.sma_indicator(close, 50)
@@ -106,6 +109,7 @@ def calculate_indicators(df):
         bb = ta.volatility.BollingerBands(close)
         df['BB_Upper'] = bb.bollinger_hband()
         df['BB_Lower'] = bb.bollinger_lband()
+
     df['Volume_SMA_20'] = df['Volume'].rolling(20).mean()
     return df
 
@@ -201,4 +205,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
