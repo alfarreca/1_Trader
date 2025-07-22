@@ -48,7 +48,7 @@ def load_tickers_from_sheet(uploaded_file, selected_sheet):
     if uploaded_file and selected_sheet:
         df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
         if 'Symbol' not in df.columns or 'Exchange' not in df.columns:
-            st.error("Sheet must contain 'Symbol' and 'Exchange'.")
+            st.error("❌ Required columns 'Symbol' and 'Exchange' not found in the selected sheet.")
             return None
         df['YFinance_Symbol'] = df.apply(lambda row: f"{row['Symbol']}.HK" if row['Exchange'] == 'HKEX' else f"{row['Symbol']}", axis=1)
         df['Display_Name'] = df['YFinance_Symbol']
@@ -136,4 +136,4 @@ def display_comparison_metrics(comparison_data, selected_companies):
     else:
         st.warning("No metrics available for the selected companies")
 
-# Main app continues as in your original version...
+# Insert your main function logic here if needed
