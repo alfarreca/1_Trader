@@ -83,6 +83,7 @@ if uploaded_file:
                 # Create DataFrame for display
                 live_pct_df = pd.DataFrame.from_dict(live_pct_change, orient='index', columns=["Live % Change"])
                 live_pct_df = live_pct_df.reset_index().rename(columns={"index": "Symbol"})
+
                 labels = [f"{m.strftime('%b %d')}→{f.strftime('%b %d')}" for m, f in weeks]
                 labels += [f"{current_week_start.strftime('%b %d')}→{datetime.today().strftime('%b %d')}"]
                 price_df = pd.DataFrame(all_data).T
@@ -112,6 +113,9 @@ if uploaded_file:
                 top_n = 20
                 top_symbols = total_pct_change.sort_values(ascending=False).head(top_n).index.tolist()
                 pct_change_from_start = norm_df.subtract(start_values, axis=0).divide(start_values, axis=0) * 100
+
+                # Merge live % change into main DataFrame
+                price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
 
                 tabs = st.tabs([
                     "📈 Price Trend",
@@ -185,5 +189,5 @@ if uploaded_file:
                     volatility = weekly_pct.std(axis=1).fillna(0)
                     st.dataframe(volatility.rename("Volatility (%)").round(2).reset_index(), use_container_width=True)
 
-with st.expander("📌 Live % Change (vs Last Friday)"):
-    st.dataframe(live_pct_df.sort_values("Live % Change", ascending=False), use_container_width=True)
+                    with st.expander("📌 Live % Change (vs Last Friday)"):
+                        st.dataframe(price_df[["Symbol", "Live % Change"]].sort_values("Live % Change", ascending=False), use_container_width=True)
