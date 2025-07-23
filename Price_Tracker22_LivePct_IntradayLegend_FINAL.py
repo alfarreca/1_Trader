@@ -140,12 +140,12 @@ if uploaded_file:
                     for sym in top_symbols:
                         live_val = live_pct_change.get(sym)
                         label_name = f"{sym} (Live: {live_val:+.2f}%)" if live_val is not None else sym
+                        fig.add_trace(go.Scatter(
                             x=labels,
                             y=norm_df.loc[sym],
                             customdata=pct_change_from_start.loc[sym].values.reshape(-1, 1),
                             mode='lines+markers',
-                            live_val = live_pct_change.get(sym)
-                            name = f"{sym} (Live: {live_val:+.2f}%)" if live_val is not None else sym
+                            name=label_name,
                             text=[sym] * len(labels),
                             hovertemplate="<b>%{text}</b><br>Price: %{y:.2f}<br>Change: %{customdata[0]:.2f}%"
                         ))
@@ -161,7 +161,6 @@ if uploaded_file:
                     normed_pct_change = norm_df.divide(start_values, axis=0) * 100
                     for sym in top_symbols:
                         change = total_pct_change[sym]
-                        live_val = live_pct_change.get(sym)
                         live_val = live_pct_change.get(sym)
                         label_name = f"{sym} (Live: {live_val:+.2f}%)" if live_val is not None else sym
                         norm_chart.add_trace(go.Scatter(
