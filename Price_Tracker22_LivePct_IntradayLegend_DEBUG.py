@@ -121,9 +121,11 @@ if uploaded_file:
                 # Merge live % change into main DataFrame
                 price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
 
-                tabs = st.tabs([
+                # Show debug expander above tabs
                 with st.expander("🧪 Debug: Intraday % Change Raw Values"):
                     st.dataframe(live_pct_df.sort_values("Live % Change", ascending=False), use_container_width=True)
+
+                tabs = st.tabs([
                     "📈 Price Trend",
                     "📊 Normalized Performance",
                     "📈 % Weekly Change",
@@ -137,7 +139,6 @@ if uploaded_file:
                     st.caption("Intraday % Change (vs yesterday) shown in legend")
                     fig = go.Figure()
                     for sym in top_symbols:
-                        live_val = live_pct_change.get(sym)
                         live_val = live_pct_change.get(sym, 0)
                         label_name = f"{sym} (Live: {live_val:+.2f}%)"
                         fig.add_trace(go.Scatter(
@@ -159,7 +160,6 @@ if uploaded_file:
                     normed_pct_change = norm_df.divide(start_values, axis=0) * 100
                     for sym in top_symbols:
                         change = total_pct_change[sym]
-                        live_val = live_pct_change.get(sym)
                         live_val = live_pct_change.get(sym, 0)
                         label_name = f"{sym} (Live: {live_val:+.2f}%)"
                         norm_chart.add_trace(go.Scatter(
