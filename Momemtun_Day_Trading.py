@@ -43,17 +43,14 @@ def calculate_momentum(data):
         low = data['Low']
         volume = data['Volume']
 
-        # EMAs
         ema5 = close.ewm(span=5).mean().iloc[-1]
         ema10 = close.ewm(span=10).mean().iloc[-1]
         ema20_series = close.ewm(span=20).mean()
         ema20 = ema20_series.iloc[-1]
 
-        # Volume ratio
         vol_avg_10 = volume.rolling(10).mean().iloc[-1]
         vol_ratio = volume.iloc[-1] / vol_avg_10 if vol_avg_10 != 0 else 1
 
-        # RSI
         delta = close.diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -62,21 +59,17 @@ def calculate_momentum(data):
         rs = avg_gain / avg_loss if avg_loss != 0 else 100
         rsi = 100 - (100 / (1 + rs))
 
-        # MACD
         ema12 = close.ewm(span=12, adjust=False).mean()
         ema26 = close.ewm(span=26, adjust=False).mean()
         macd = ema12 - ema26
         macd_signal = macd.ewm(span=9, adjust=False).mean()
         macd_status = "Bullish" if macd.iloc[-1] > macd_signal.iloc[-1] else "Bearish"
 
-        # Price gap from EMA20
         price_gap_ema20 = ((close.iloc[-1] - ema20) / ema20) * 100
 
-        # Breakouts
         above_ema20 = close.iloc[-1] > ema20
         broke_5d_high = close.iloc[-1] > high.rolling(5).max().iloc[-2]
 
-        # Score
         score = 0
         if ema5 > ema10 > ema20: score += 30
         if above_ema20: score += 20
@@ -108,7 +101,6 @@ def get_ticker_data(symbol, exchange):
     try:
         yf_symbol = map_symbol(symbol, exchange)
         ticker = yf.Ticker(yf_symbol)
-
         time.sleep(random.uniform(*REQUEST_DELAY))
         data = ticker.history(period="1mo")
 
@@ -161,61 +153,59 @@ def main():
     breakout_filter = st.sidebar.checkbox("Price Above EMA20", True)
     china_boost = st.sidebar.checkbox("Boost Chinese Stocks", True)
 
-    st.subheader("Fetching Data...")
-    progress = st.progress(0)
-    results = []
+    if st.sidebar.button("🔁 Refresh Results"):
+        st.session_state.apply_filters = True
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(get_ticker_data, row["Symbol"], row["Exchange"]): row for _, row in df.iterrows()}
+    if "apply_filters" not in st.session_state:
+        st.session_state.apply_filters = True
 
-        for i, future in enumerate(as_completed(futures)):
-            row = futures[future]
-            data = future.result()
-            if data:
-                if china_boost and row["Exchange"] in ["SHZ", "SHH", "SHE", "SHA"]:
-                    data["Momentum_Score"] = min(100, data["Momentum_Score"] + 5)
-                results.append(data)
-            progress.progress((i + 1) / len(futures))
+    if "results_df" not in st.session_state:
+        st.subheader("Fetching Data...")
+        progress = st.progress(0)
+        results = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(get_ticker_data, row["Symbol"], row["Exchange"]): row for _, row in df.iterrows()}
+            for i, future in enumerate(as_completed(futures)):
+                row = futures[future]
+                data = future.result()
+                if data:
+                    if china_boost and row["Exchange"] in ["SHZ", "SHH", "SHE", "SHA"]:
+                        data["Momentum_Score"] = min(100, data["Momentum_Score"] + 5)
+                    results.append(data)
+                progress.progress((i + 1) / len(futures))
+        st.session_state.results_df = pd.DataFrame(results)
+    else:
+        st.success("✔️ Loaded cached results. Use the refresh button to reapply filters.")
 
-    if not results:
-        st.error("""
-        No data fetched. Common solutions:
-        1. Verify symbol formats (e.g., 600000.SS for Shanghai)
-        2. Try fewer stocks at once
-        3. Check your internet connection
-        4. Some Chinese stocks may have data restrictions
-        """)
-        return
+    if st.session_state.apply_filters:
+        results_df = st.session_state.results_df
+        filtered = results_df[results_df["Momentum_Score"] >= min_score]
+        if volume_filter:
+            filtered = filtered[filtered["Volume_Ratio"] > 1.5]
+        if breakout_filter:
+            filtered = filtered[filtered["Above_EMA20"]]
 
-    results_df = pd.DataFrame(results)
+        st.subheader(f"Results: {len(filtered)} Stocks")
 
-    filtered = results_df[results_df["Momentum_Score"] >= min_score]
-    if volume_filter:
-        filtered = filtered[filtered["Volume_Ratio"] > 1.5]
-    if breakout_filter:
-        filtered = filtered[filtered["Above_EMA20"]]
+        def color_positive(val):
+            color = 'green' if val > 0 else 'red'
+            return f'color: {color}'
 
-    st.subheader(f"Results: {len(filtered)} Stocks")
+        st.dataframe(
+            filtered.sort_values("Momentum_Score", ascending=False).style.applymap(
+                color_positive, subset=["5D_Change"]
+            ),
+            height=600,
+            use_container_width=True
+        )
 
-    def color_positive(val):
-        color = 'green' if val > 0 else 'red'
-        return f'color: {color}'
-
-    st.dataframe(
-        filtered.sort_values("Momentum_Score", ascending=False).style.applymap(
-            color_positive, subset=["5D_Change"]
-        ),
-        height=600,
-        use_container_width=True
-    )
-
-    csv = filtered.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "💾 Download Results",
-        csv,
-        "momentum_results.csv",
-        "text/csv"
-    )
+        csv = filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "💾 Download Results",
+            csv,
+            "momentum_results.csv",
+            "text/csv"
+        )
 
 if __name__ == "__main__":
     main()
