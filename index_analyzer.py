@@ -32,13 +32,29 @@ def calculate_rsi(data, window=14):
 
 def safe_get_price(data):
     try:
-        return f"${data['Close'].iloc[-1]:,.2f}" if not pd.isna(data['Close'].iloc[-1]) else "N/A"
+        if data is None or data.empty or 'Close' not in data:
+            return "N/A"
+        last_close = data['Close'].iloc[-1]
+        return f"${last_close:,.2f}" if not pd.isna(last_close) else "N/A"
     except:
         return "N/A"
 
 def safe_get_rsi(rsi_series):
     try:
-        return f"{rsi_series.iloc[-1]:.1f}" if not pd.isna(rsi_series.iloc[-1]) else "N/A"
+        if rsi_series is None or rsi_series.empty:
+            return "N/A"
+        last_rsi = rsi_series.iloc[-1]
+        return f"{last_rsi:.1f}" if not pd.isna(last_rsi) else "N/A"
+    except:
+        return "N/A"
+
+def safe_get_trend(data):
+    try:
+        if data is None or data.empty or 'Close' not in data or len(data) < 2:
+            return "N/A"
+        current = data['Close'].iloc[-1]
+        previous = data['Close'].iloc[-2]
+        return "↑" if current > previous else "↓" if current < previous else "→"
     except:
         return "N/A"
 
@@ -137,7 +153,7 @@ def main():
             # Normalized price comparison
             fig1, ax1 = plt.subplots(figsize=(12, 5))
             for ticker, data in all_data.items():
-                if not data.empty and 'Close' in data:
+                if not data.empty and 'Close' in data and len(data) > 0:
                     norm_price = (data['Close'] / data['Close'].iloc[0]) * 100
                     ax1.plot(data.index, norm_price, label=ticker)
             ax1.set_title("Normalized Price Comparison")
@@ -148,7 +164,7 @@ def main():
             # RSI comparison
             fig2, ax2 = plt.subplots(figsize=(12, 5))
             for ticker, data in all_data.items():
-                if not data.empty and 'RSI' in data:
+                if not data.empty and 'RSI' in data and len(data) > 0:
                     ax2.plot(data.index, data['RSI'], label=ticker)
             ax2.axhline(70, color='red', linestyle='--')
             ax2.axhline(30, color='green', linestyle='--')
@@ -164,14 +180,14 @@ def main():
                     ticker,
                     safe_get_price(data),
                     safe_get_rsi(data['RSI']) if 'RSI' in data else "N/A",
-                    "↑" if not data.empty and data['Close'].iloc[-1] > data['Close'].iloc[-2] else "↓"
+                    safe_get_trend(data)
                 ])
             
             st.dataframe(
                 pd.DataFrame(
                     summary,
                     columns=["Ticker", "Price", "RSI (14)", "Trend"]
-                ).sort_values("RSI", ascending=False, key=lambda x: pd.to_numeric(x, errors='coerce')),
+                ).sort_values("RSI", ascending=False, key=lambda x: pd.to_numeric(x.replace('N/A', '0'), errors='coerce')),
                 hide_index=True
             )
         else:
