@@ -58,6 +58,32 @@ def safe_get_trend(data):
     except:
         return "N/A"
 
+def create_summary_table(all_data):
+    summary = []
+    for ticker, data in all_data.items():
+        summary.append([
+            ticker,
+            safe_get_price(data),
+            safe_get_rsi(data['RSI']) if 'RSI' in data else "N/A",
+            safe_get_trend(data)
+        ])
+    
+    df = pd.DataFrame(
+        summary,
+        columns=["Ticker", "Price", "RSI (14)", "Trend"]
+    )
+    
+    # Safe sorting that handles missing RSI values
+    if "RSI (14)" in df.columns:
+        try:
+            df['RSI_num'] = pd.to_numeric(df["RSI (14)"].replace('N/A', np.nan), errors='coerce')
+            df = df.sort_values("RSI_num", ascending=False)
+            df = df.drop(columns=['RSI_num'])
+        except:
+            pass
+    
+    return df
+
 def main():
     st.set_page_config(page_title="Index Analyzer", layout="wide")
     st.title("📈 Index Analysis Dashboard")
@@ -174,20 +200,8 @@ def main():
             st.pyplot(fig2)
             
             # Summary table
-            summary = []
-            for ticker, data in all_data.items():
-                summary.append([
-                    ticker,
-                    safe_get_price(data),
-                    safe_get_rsi(data['RSI']) if 'RSI' in data else "N/A",
-                    safe_get_trend(data)
-                ])
-            
             st.dataframe(
-                pd.DataFrame(
-                    summary,
-                    columns=["Ticker", "Price", "RSI (14)", "Trend"]
-                ).sort_values("RSI", ascending=False, key=lambda x: pd.to_numeric(x.replace('N/A', '0'), errors='coerce')),
+                create_summary_table(all_data),
                 hide_index=True
             )
         else:
