@@ -25,9 +25,10 @@ def safe_yfinance_fetch(ticker, period=SCAN_PERIOD):
 
 def exchange_suffix(ex: str) -> str:
     suffix_map = {
-        "NYSE": "", "NASDAQ": "", 
-        "ETR": "DE", "EPA": "PA", "LON": "L", 
-        "TSX": "TO", "HKG": "HK", "ASX": "AX"
+        "SHZ": "SZ", "SHH": "SS", "KOE": "KS", "HKG": "HK", 
+        "FRA": "F", "JPX": "T", "TOR": "TO", "ASX": "AX",
+        "NMS": "", "NYQ": "", "PCX": "", "BTS": "", "ASE": "",
+        "NGM": "", "NCM": "", "PAR": "PA", "LSE": "L"
     }
     return suffix_map.get(ex.upper(), "")
 
@@ -35,20 +36,8 @@ def map_to_yfinance_symbol(symbol: str, exchange: str) -> str:
     suffix = exchange_suffix(exchange)
     return f"{symbol}.{suffix}" if suffix else symbol
 
-def calculate_di_crossovers(hist, period=14):
-    high, low, close = hist['High'], hist['Low'], hist['Close']
-    plus_dm = np.where((high.diff() > -low.diff()) & (high.diff() > 0), high.diff(), 0)
-    minus_dm = np.where((-low.diff() > high.diff()) & (-low.diff() > 0), -low.diff(), 0)
-    tr = np.maximum(high - low, np.abs(high - close.shift()), np.abs(low - close.shift()))
-    atr = pd.Series(tr).rolling(period).mean()
-    plus_di = 100 * pd.Series(plus_dm).rolling(period).mean() / atr
-    minus_di = 100 * pd.Series(minus_dm).rolling(period).mean() / atr
-    bullish = (plus_di > minus_di) & (plus_di.shift(1) <= minus_di.shift(1))
-    bearish = (minus_di > plus_di) & (minus_di.shift(1) <= plus_di.shift(1))
-    return plus_di, minus_di, bullish, bearish
-
 def calculate_momentum(hist):
-    if hist.empty or len(hist) < 15:  # Reduced minimum bars
+    if hist.empty or len(hist) < 10:  # Reduced minimum bars
         return None
     
     close, high, low, volume = hist['Close'], hist['High'], hist['Low'], hist['Volume']
@@ -58,19 +47,16 @@ def calculate_momentum(hist):
     ema10 = close.ewm(span=10).mean().iloc[-1]
     ema20 = close.ewm(span=20).mean().iloc[-1]
     
-    # Volume analysis
+    # Volume analysis (10-day avg)
     vol_avg_10 = volume.rolling(10).mean().iloc[-1]
     vol_ratio = volume.iloc[-1] / vol_avg_10 if vol_avg_10 != 0 else 1
-    volume_spike = vol_ratio > 2.0
+    volume_spike = vol_ratio > 1.5  # Reduced from 2.0
     
-    # Breakout detection
-    high_5d = high.rolling(5).max().iloc[-2]  # Yesterday's 5-day high
-    broke_5d_high = close.iloc[-1] > high_5d
+    # Breakout conditions
+    broke_5d_high = close.iloc[-1] > high.rolling(5).max().iloc[-2]  # Previous day's high
+    above_ema20 = close.iloc[-1] > ema20  # Simpler breakout condition
     
-    # Pullback to EMA20
-    pullback_ema20 = (close.iloc[-1] > ema20) & (close.iloc[-2] <= ema20)
-    
-    # RSI and ADX
+    # RSI
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -79,31 +65,25 @@ def calculate_momentum(hist):
     rs = avg_gain / avg_loss if avg_loss != 0 else 100
     rsi = 100 - (100 / (1 + rs))
     
-    # ADX (trend strength)
-    plus_di, minus_di, bullish_cross, bearish_cross = calculate_di_crossovers(hist)
-    adx = (abs(plus_di - minus_di) / (plus_di + minus_di)).rolling(14).mean().iloc[-1]
-    
     # Momentum Score (0-100)
     score = 0
-    if ema5 > ema10 > ema20: score += 30  # Short-term uptrend
-    if 40 <= rsi < 70: score += 20        # Ideal RSI range
-    if volume_spike: score += 20           # Volume confirms
-    if broke_5d_high: score += 15          # Breakout signal
-    if adx > 25: score += 15               # Strong trend
+    if ema5 > ema10 > ema20: score += 25  # Strong short-term trend
+    if above_ema20: score += 20            # Price above EMA20
+    if 40 < rsi < 70: score += 20          # Ideal RSI range
+    if volume_spike: score += 15           # Volume confirms
+    if broke_5d_high: score += 10          # Bonus for 5D breakout
     
     return {
         "EMA5": round(ema5, 2),
         "EMA10": round(ema10, 2),
         "EMA20": round(ema20, 2),
         "RSI": round(rsi, 1),
-        "ADX": round(adx, 1) if not np.isnan(adx) else None,
         "Volume_Ratio": round(vol_ratio, 2),
         "Volume_Spike": volume_spike,
+        "Above_EMA20": above_ema20,
         "5D_Breakout": broke_5d_high,
-        "Pullback_EMA20": pullback_ema20,
         "Momentum_Score": min(100, score),
         "Trend": "↑ Strong" if score >= 70 else "↑ Medium" if score >= 50 else "↗ Weak",
-        "Last_Updated": datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M")
     }
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -112,6 +92,7 @@ def get_ticker_data(_ticker, exchange, yf_symbol):
         ticker_obj = yf.Ticker(yf_symbol)
         hist = safe_yfinance_fetch(ticker_obj)
         if hist.empty:
+            st.warning(f"No data for {_ticker} ({yf_symbol})")
             return None
         momentum = calculate_momentum(hist)
         if not momentum:
@@ -124,7 +105,7 @@ def get_ticker_data(_ticker, exchange, yf_symbol):
             **momentum
         }
     except Exception as e:
-        st.warning(f"Error with {_ticker}: {str(e)}")
+        st.error(f"Error with {_ticker} ({yf_symbol}): {str(e)}")
         return None
 
 def main():
@@ -141,9 +122,9 @@ def main():
     df["YF_Symbol"] = df.apply(lambda r: map_to_yfinance_symbol(r["Symbol"], r["Exchange"]), axis=1)
     
     # Filters
-    min_score = st.sidebar.slider("Min Momentum Score", 50, 100, 70)
-    volume_filter = st.sidebar.checkbox("Volume Spike (>2x avg)", True)
-    breakout_filter = st.sidebar.checkbox("5-Day Breakout", True)
+    min_score = st.sidebar.slider("Min Momentum Score", 0, 100, 50)
+    volume_filter = st.sidebar.checkbox("Volume Spike (>1.5x avg)", False)  # Reduced threshold
+    breakout_filter = st.sidebar.checkbox("Price Above EMA20", True)  # More reliable than 5D breakout
     
     # Fetch data
     progress = st.progress(0)
@@ -165,7 +146,7 @@ def main():
     if volume_filter:
         filtered = filtered[filtered["Volume_Spike"]]
     if breakout_filter:
-        filtered = filtered[filtered["5D_Breakout"]]
+        filtered = filtered[filtered["Above_EMA20"]]
     
     # Display
     st.metric("Stocks Found", len(filtered))
@@ -173,7 +154,7 @@ def main():
         filtered.sort_values("Momentum_Score", ascending=False).reset_index(drop=True),
         column_config={
             "Volume_Spike": st.column_config.CheckboxColumn("Volume Spike?"),
-            "5D_Breakout": st.column_config.CheckboxColumn("5D Breakout?")
+            "Above_EMA20": st.column_config.CheckboxColumn("Above EMA20?")
         },
         use_container_width=True,
         height=600
