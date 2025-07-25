@@ -152,12 +152,7 @@ def main():
     volume_filter = st.sidebar.checkbox("Volume Spike (>1.5x avg)", True)
     breakout_filter = st.sidebar.checkbox("Price Above EMA20", True)
     china_boost = st.sidebar.checkbox("Boost Chinese Stocks", True)
-
-    if st.sidebar.button("🔁 Refresh Results"):
-        st.session_state.apply_filters = True
-
-    if "apply_filters" not in st.session_state:
-        st.session_state.apply_filters = True
+    refresh = st.sidebar.button("🔁 Refresh Results")
 
     if "results_df" not in st.session_state:
         st.subheader("Fetching Data...")
@@ -177,7 +172,7 @@ def main():
     else:
         st.success("✔️ Loaded cached results. Use the refresh button to reapply filters.")
 
-    if st.session_state.apply_filters:
+    if "results_df" in st.session_state and refresh:
         results_df = st.session_state.results_df
         filtered = results_df[results_df["Momentum_Score"] >= min_score]
         if volume_filter:
