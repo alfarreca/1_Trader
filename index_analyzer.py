@@ -16,15 +16,31 @@ def fetch_index_data(ticker, period='1y'):
         return None
 
 def calculate_rsi(data, window=14):
-    delta = data['Close'].diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    
-    avg_gain = gain.rolling(window=window).mean()
-    avg_loss = loss.rolling(window=window).mean()
-    
-    rs = avg_gain / (avg_loss + 1e-10)  # Add small value to avoid division by zero
-    return 100 - (100 / (1 + rs))
+    try:
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=window).mean()
+        avg_loss = loss.rolling(window=window).mean()
+        
+        rs = avg_gain / (avg_loss + 1e-10)  # Add small value to avoid division by zero
+        return 100 - (100 / (1 + rs))
+    except Exception as e:
+        st.error(f"RSI calculation failed: {e}")
+        return None
+
+def safe_get_price(data):
+    try:
+        return f"${data['Close'].iloc[-1]:,.2f}" if not pd.isna(data['Close'].iloc[-1]) else "N/A"
+    except:
+        return "N/A"
+
+def safe_get_rsi(rsi_series):
+    try:
+        return f"{rsi_series.iloc[-1]:.1f}" if not pd.isna(rsi_series.iloc[-1]) else "N/A"
+    except:
+        return "N/A"
 
 def main():
     st.set_page_config(page_title="Index Analyzer", layout="wide")
@@ -64,33 +80,34 @@ def main():
         selected = st.selectbox("Select Index", tickers)
         data = fetch_index_data(selected, period)
         
-        if data is not None:  # Explicit check instead of truthy evaluation
+        if data is not None:
             try:
                 data['RSI'] = calculate_rsi(data)
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("Current Price", f"${data['Close'].iloc[-1]:,.2f}")
+                    st.metric("Current Price", safe_get_price(data))
                 with col2:
-                    rsi_value = data['RSI'].iloc[-1]
-                    status = "🟢 Oversold" if rsi_value < 30 else "🔴 Overbought" if rsi_value > 70 else "🟠 Neutral"
-                    st.metric("RSI (14)", f"{rsi_value:.1f}", status)
+                    rsi_value = safe_get_rsi(data['RSI']) if 'RSI' in data else "N/A"
+                    status = "🟢 Oversold" if rsi_value != "N/A" and float(rsi_value) < 30 else "🔴 Overbought" if rsi_value != "N/A" and float(rsi_value) > 70 else "🟠 Neutral"
+                    st.metric("RSI (14)", rsi_value, status)
 
                 # Plotting
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-                
-                ax1.plot(data.index, data['Close'], color='royalblue')
-                ax1.set_title(f"{selected} Price History")
-                ax1.grid(True, alpha=0.3)
-                
-                ax2.plot(data.index, data['RSI'], color='purple')
-                ax2.axhline(70, color='red', linestyle='--')
-                ax2.axhline(30, color='green', linestyle='--')
-                ax2.set_title("RSI (14-day)")
-                ax2.set_ylim(0, 100)
-                ax2.grid(True, alpha=0.3)
-                
-                st.pyplot(fig)
+                if not data.empty and 'Close' in data and 'RSI' in data:
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+                    
+                    ax1.plot(data.index, data['Close'], color='royalblue')
+                    ax1.set_title(f"{selected} Price History")
+                    ax1.grid(True, alpha=0.3)
+                    
+                    ax2.plot(data.index, data['RSI'], color='purple')
+                    ax2.axhline(70, color='red', linestyle='--')
+                    ax2.axhline(30, color='green', linestyle='--')
+                    ax2.set_title("RSI (14-day)")
+                    ax2.set_ylim(0, 100)
+                    ax2.grid(True, alpha=0.3)
+                    
+                    st.pyplot(fig)
                 
                 with st.expander("View Raw Data"):
                     st.dataframe(data.sort_index(ascending=False))
@@ -108,8 +125,10 @@ def main():
             data = fetch_index_data(ticker, period)
             if data is not None:
                 try:
-                    data['RSI'] = calculate_rsi(data)
-                    all_data[ticker] = data
+                    rsi = calculate_rsi(data)
+                    if rsi is not None:
+                        data['RSI'] = rsi
+                        all_data[ticker] = data
                 except Exception as e:
                     st.error(f"Error processing {ticker}: {e}")
             progress_bar.progress((i + 1) / len(tickers))
@@ -118,8 +137,9 @@ def main():
             # Normalized price comparison
             fig1, ax1 = plt.subplots(figsize=(12, 5))
             for ticker, data in all_data.items():
-                norm_price = (data['Close'] / data['Close'].iloc[0]) * 100
-                ax1.plot(data.index, norm_price, label=ticker)
+                if not data.empty and 'Close' in data:
+                    norm_price = (data['Close'] / data['Close'].iloc[0]) * 100
+                    ax1.plot(data.index, norm_price, label=ticker)
             ax1.set_title("Normalized Price Comparison")
             ax1.legend()
             ax1.grid(True, alpha=0.3)
@@ -128,7 +148,8 @@ def main():
             # RSI comparison
             fig2, ax2 = plt.subplots(figsize=(12, 5))
             for ticker, data in all_data.items():
-                ax2.plot(data.index, data['RSI'], label=ticker)
+                if not data.empty and 'RSI' in data:
+                    ax2.plot(data.index, data['RSI'], label=ticker)
             ax2.axhline(70, color='red', linestyle='--')
             ax2.axhline(30, color='green', linestyle='--')
             ax2.set_title("RSI Comparison")
@@ -141,16 +162,16 @@ def main():
             for ticker, data in all_data.items():
                 summary.append([
                     ticker,
-                    f"${data['Close'].iloc[-1]:,.2f}",
-                    f"{data['RSI'].iloc[-1]:.1f}",
-                    "↑" if data['Close'].iloc[-1] > data['Close'].iloc[-2] else "↓"
+                    safe_get_price(data),
+                    safe_get_rsi(data['RSI']) if 'RSI' in data else "N/A",
+                    "↑" if not data.empty and data['Close'].iloc[-1] > data['Close'].iloc[-2] else "↓"
                 ])
             
             st.dataframe(
                 pd.DataFrame(
                     summary,
                     columns=["Ticker", "Price", "RSI (14)", "Trend"]
-                ).sort_values("RSI", ascending=False),
+                ).sort_values("RSI", ascending=False, key=lambda x: pd.to_numeric(x, errors='coerce')),
                 hide_index=True
             )
         else:
