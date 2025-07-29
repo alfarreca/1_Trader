@@ -39,7 +39,11 @@ def fetch_current_week_close(symbol, current_week_start):
     df = yf.download(symbol, start=current_week_start, end=today + timedelta(days=1), interval="1d", progress=False)
     if df.empty or "Close" not in df.columns:
         return np.nan
-    return float(round(df["Close"].dropna().iloc[-1], 3)) if not df["Close"].dropna().empty else np.nan
+    closes = df["Close"].dropna()
+    if closes.empty:
+        return np.nan
+    last_close = closes.iloc[-1]
+    return round(float(last_close), 3)
 
 def calculate_max_drawdown(prices):
     if len(prices) < 2: return 0.0
