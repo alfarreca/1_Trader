@@ -58,6 +58,15 @@ if uploaded_file:
         if "Symbol" not in df.columns:
             st.error("Excel must contain a 'Symbol' column.")
         else:
+            # ---- SIDEBAR FILTERS ----
+            filter_cols = ["Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type"]
+            for col in filter_cols:
+                if col in df.columns:
+                    unique_vals = df[col].dropna().unique().tolist()
+                    selected_vals = st.sidebar.multiselect(f"Filter by {col}", sorted(unique_vals))
+                    if selected_vals:
+                        df = df[df[col].isin(selected_vals)]
+
             symbols = df["Symbol"].dropna().unique().tolist()
             weeks, last_friday = get_last_n_weeks(6)
             current_week_start = last_friday
