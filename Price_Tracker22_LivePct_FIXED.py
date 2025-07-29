@@ -55,8 +55,8 @@ if uploaded_file:
 
     if sheet_choice:
         df = pd.read_excel(xls, sheet_name=sheet_choice)
-        if not all(col in df.columns for col in ["Symbol", "Exchange"]):
-            st.error("Excel must contain 'Symbol' and 'Exchange'")
+        if "Symbol" not in df.columns:
+            st.error("Excel must contain a 'Symbol' column.")
         else:
             symbols = df["Symbol"].dropna().unique().tolist()
             weeks, last_friday = get_last_n_weeks(6)
@@ -80,7 +80,6 @@ if uploaded_file:
                         live_change = np.nan
                     live_pct_change[sym] = round(live_change, 2)
 
-                # Create DataFrame for display
                 live_pct_df = pd.DataFrame.from_dict(live_pct_change, orient='index', columns=["Live % Change"])
                 live_pct_df = live_pct_df.reset_index().rename(columns={"index": "Symbol"})
 
@@ -173,7 +172,12 @@ if uploaded_file:
                     scores["Trend"] = norm_df.apply(lambda row: sum(row.diff().fillna(0) > 0), axis=1)
                     scores["Total Return (%)"] = ((norm_df.iloc[:, -1] - norm_df.iloc[:, 0]) / norm_df.iloc[:, 0] * 100).fillna(0)
                     scores["All-Around"] = scores.sum(axis=1)
-                    st.dataframe(scores.round(2).sort_values("All-Around", ascending=False), use_container_width=True)
+
+                    metadata_cols = ["Name", "Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type", "Notes"]
+                    meta = df.set_index("Symbol")[metadata_cols].copy()
+                    combined_scores = meta.join(scores, how="right")
+
+                    st.dataframe(combined_scores.round(2).sort_values("All-Around", ascending=False).reset_index(), use_container_width=True)
 
                 with tabs[4]:
                     st.subheader("📉 Max Drawdown")
