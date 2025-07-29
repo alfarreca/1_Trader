@@ -69,7 +69,6 @@ if uploaded_file:
                 all_data[sym] = closes + [current]
 
             if all_data:
-                # --- Live % Change from Last Friday ---
                 live_pct_change = {}
                 for sym in all_data:
                     last_friday_close = all_data[sym][-2] if len(all_data[sym]) >= 2 else np.nan
@@ -113,7 +112,6 @@ if uploaded_file:
                 top_symbols = total_pct_change.sort_values(ascending=False).head(top_n).index.tolist()
                 pct_change_from_start = norm_df.subtract(start_values, axis=0).divide(start_values, axis=0) * 100
 
-                # Merge live % change into main DataFrame
                 price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
 
                 tabs = st.tabs([
@@ -174,7 +172,11 @@ if uploaded_file:
                     scores["All-Around"] = scores.sum(axis=1)
 
                     metadata_cols = ["Name", "Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type", "Notes"]
-                    meta = df.set_index("Symbol")[metadata_cols].copy()
+                    available_cols = [col for col in metadata_cols if col in df.columns]
+                    missing_cols = [col for col in metadata_cols if col not in df.columns]
+                    if missing_cols:
+                        st.warning(f"Missing metadata columns: {missing_cols}")
+                    meta = df.set_index("Symbol")[available_cols].copy()
                     combined_scores = meta.join(scores, how="right")
 
                     st.dataframe(combined_scores.round(2).sort_values("All-Around", ascending=False).reset_index(), use_container_width=True)
