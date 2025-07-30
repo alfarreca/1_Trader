@@ -45,8 +45,6 @@ def fetch_current_week_close(symbol, current_week_start):
     last_close = closes.iloc[-1]
     return round(float(last_close), 3)
 
-def calculate_max_drawdown(prices):
-
 def fetch_intraday_live_price(symbol):
     try:
         info = yf.Ticker(symbol).info
@@ -59,6 +57,7 @@ def fetch_intraday_live_price(symbol):
         return round(current_price, 3), round(pct_change, 2)
     except Exception as e:
         return np.nan, np.nan
+
 def calculate_max_drawdown(prices):
     if len(prices) < 2: return 0.0
     arr = np.array(prices, dtype=np.float64)
@@ -76,7 +75,6 @@ if uploaded_file:
         if "Symbol" not in df.columns:
             st.error("Excel must contain a 'Symbol' column.")
         else:
-            # ---- SIDEBAR FILTERS ----
             filter_cols = ["Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type"]
             for col in filter_cols:
                 if col in df.columns:
@@ -89,15 +87,15 @@ if uploaded_file:
             weeks, last_friday = get_last_n_weeks(6)
             current_week_start = last_friday
 
-            all_data = {}
-intraday_price = {}
+            intraday_price = {}
             intraday_change = {}
 
+            all_data = {}
             for sym in symbols:
                 price, change = fetch_intraday_live_price(sym)
                 intraday_price[sym] = price
                 intraday_change[sym] = change
-            for sym in symbols:
+
                 closes = fetch_friday_closes(sym, weeks)
                 current = fetch_current_week_close(sym, current_week_start)
                 all_data[sym] = closes + [current]
@@ -116,6 +114,12 @@ intraday_price = {}
                 live_pct_df = pd.DataFrame.from_dict(live_pct_change, orient='index', columns=["Live % Change"])
                 live_pct_df = live_pct_df.reset_index().rename(columns={"index": "Symbol"})
 
+                intraday_df = pd.DataFrame({
+                    "Symbol": list(intraday_price.keys()),
+                    "Live Price": list(intraday_price.values()),
+                    "Intraday % Change": list(intraday_change.values())
+                })
+
                 labels = [f"{m.strftime('%b %d')}→{f.strftime('%b %d')}" for m, f in weeks]
                 labels += [f"{current_week_start.strftime('%b %d')}→{datetime.today().strftime('%b %d')}"]
                 price_df = pd.DataFrame(all_data).T
@@ -125,6 +129,9 @@ intraday_price = {}
 
                 for col in labels:
                     price_df[col] = pd.to_numeric(price_df[col], errors="coerce")
+
+                price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
+                price_df = price_df.merge(intraday_df, on="Symbol", how="left")
 
                 norm_df = price_df.set_index("Symbol")[labels]
                 safe_norm = norm_df.copy()
@@ -145,15 +152,6 @@ intraday_price = {}
                 top_n = 20
                 top_symbols = total_pct_change.sort_values(ascending=False).head(top_n).index.tolist()
                 pct_change_from_start = norm_df.subtract(start_values, axis=0).divide(start_values, axis=0) * 100
-
-                price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
-intraday_df = pd.DataFrame({
-                    "Symbol": list(intraday_price.keys()),
-                    "Live Price": list(intraday_price.values()),
-                    "Intraday % Change": list(intraday_change.values())
-                })
-
-                price_df = price_df.merge(intraday_df, on="Symbol", how="left")
 
                 tabs = st.tabs([
                     "📈 Price Trend",
