@@ -16,46 +16,10 @@ CACHE_TTL = 3600 * 12
 MAX_RETRIES = 3
 TIMEZONE = 'America/New_York'
 
-yf.set_tz_cache_location("cache")
-
 @retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=1, min=4, max=10))
 def safe_yfinance_fetch(ticker, period="3mo"):
     time.sleep(random.uniform(*REQUEST_DELAY))
     return ticker.history(period=period)
-
-def exchange_suffix(ex: str) -> str:
-    suffix_map = {
-        "ETR": "DE", "EPA": "PA", "LON": "L", "BIT": "MI", "STO": "ST",
-        "SWX": "SW", "TSE": "TO", "TSX": "TO", "TSXV": "V", "ASX": "AX",
-        "HKG": "HK", "CNY": "SS", "TORONTO": "TO"
-    }
-    return suffix_map.get(ex.upper(), "")
-
-def map_to_yfinance_symbol(symbol: str, exchange: str) -> str:
-    if exchange.upper() in ["NYSE", "NASDAQ"]:
-        return symbol
-    suffix = exchange_suffix(exchange)
-    return f"{symbol}.{suffix}" if suffix else symbol
-
-def calculate_di_crossovers(hist, period=14):
-    high = hist['High']
-    low = hist['Low']
-    close = hist['Close']
-    plus_dm = high.diff()
-    minus_dm = -low.diff()
-    plus_dm = np.where((plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0)
-    minus_dm = np.where((minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0)
-    tr = np.maximum.reduce([
-        high - low,
-        np.abs(high - close.shift()),
-        np.abs(low - close.shift())
-    ])
-    atr = pd.Series(tr).rolling(window=period, min_periods=period).mean()
-    plus_di = 100 * pd.Series(plus_dm).rolling(window=period).mean() / atr
-    minus_di = 100 * pd.Series(minus_dm).rolling(window=period).mean() / atr
-    bullish_crossover = (plus_di > minus_di) & (plus_di.shift(1) <= minus_di.shift(1))
-    bearish_crossover = (minus_di > plus_di) & (minus_di.shift(1) <= plus_di.shift(1))
-    return plus_di, minus_di, bullish_crossover, bearish_crossover
 
 def calculate_momentum(hist):
     if hist.empty or len(hist) < 50:
@@ -90,9 +54,6 @@ def calculate_momentum(hist):
     minus_di = 100 * (minus_dm.rolling(14).sum() / atr)
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     adx = dx.rolling(14).mean().iloc[-1] if not dx.isnull().all() else dx.mean()
-    plus_di_c, minus_di_c, bullish_cross, bearish_cross = calculate_di_crossovers(hist)
-    last_bullish = bool(bullish_cross.iloc[-1])
-    last_bearish = bool(bearish_cross.iloc[-1])
     score = 0
     if close.iloc[-1] > ema20 > ema50 > ema200:
         score += 30
@@ -116,10 +77,6 @@ def calculate_momentum(hist):
         score += 15
     elif adx > 20:
         score += 10
-    if last_bullish:
-        score += 10
-    if last_bearish:
-        score -= 10
     score = max(0, min(100, score))
     return {
         "EMA20": round(ema20, 2), "EMA50": round(ema50, 2), "EMA200": round(ema200, 2),
@@ -128,17 +85,13 @@ def calculate_momentum(hist):
         "Volume_Ratio": round(volume_ratio, 2),
         "Momentum_Score": score,
         "Trend": "↑ Strong" if score >= 80 else "↑ Medium" if score >= 60 else "↗ Weak" if score >= 40 else "→ Neutral",
-        "Bullish_Crossover": last_bullish,
-        "Bearish_Crossover": last_bearish,
-        "plus_di_last": round(plus_di_c.iloc[-1], 1) if not np.isnan(plus_di_c.iloc[-1]) else None,
-        "minus_di_last": round(minus_di_c.iloc[-1], 1) if not np.isnan(minus_di_c.iloc[-1]) else None,
     }
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def get_ticker_data(_ticker, exchange, yf_symbol):
+def get_ticker_data(ticker):
     try:
-        ticker_obj = yf.Ticker(yf_symbol)
-        hist = safe_yfinance_fetch(ticker_obj)
+        yf_ticker = yf.Ticker(ticker)
+        hist = safe_yfinance_fetch(yf_ticker)
         if hist.empty or len(hist) < 50:
             return None
         momentum_data = calculate_momentum(hist)
@@ -148,36 +101,16 @@ def get_ticker_data(_ticker, exchange, yf_symbol):
         five_day_change = ((current_price / hist['Close'].iloc[-5] - 1) * 100) if len(hist) >= 5 else None
         twenty_day_change = ((current_price / hist['Close'].iloc[-20] - 1) * 100) if len(hist) >= 20 else None
         return {
-            "Symbol": _ticker, "Exchange": exchange, "Price": round(current_price, 2),
+            "Symbol": ticker,
+            "Price": round(current_price, 2),
             "5D_Change": round(five_day_change, 1) if five_day_change else None,
             "20D_Change": round(twenty_day_change, 1) if twenty_day_change else None,
             **momentum_data,
-            "Last_Updated": datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M"),
-            "YF_Symbol": yf_symbol
+            "Last_Updated": datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M")
         }
     except Exception as e:
-        st.warning(f"Error processing {_ticker}: {str(e)}")
+        st.warning(f"Error processing {ticker}: {str(e)}")
         return None
-
-def display_results(filtered_df):
-    if filtered_df.empty:
-        st.warning("No stocks match your current filters.")
-        return
-    st.metric("Stocks Found", len(filtered_df))
-    st.metric("Avg Momentum Score", round(filtered_df["Momentum_Score"].mean(), 1))
-    st.dataframe(filtered_df.sort_values("Momentum_Score", ascending=False), use_container_width=True, height=600)
-
-def display_symbol_details(selected_symbol):
-    if not selected_symbol:
-        return
-    try:
-        symbol_data = st.session_state.filtered_results[
-            st.session_state.filtered_results["Symbol"] == selected_symbol
-        ].iloc[0]
-        st.subheader(f"{selected_symbol} Detailed Analysis")
-        st.json(symbol_data.to_dict())
-    except Exception as e:
-        st.error(f"Error loading {selected_symbol}: {str(e)}")
 
 def main():
     st.set_page_config(page_title="S&P 500 Momentum Scanner", layout="wide")
@@ -189,70 +122,52 @@ def main():
         sheet_names = xls.sheet_names
         selected_sheet = st.selectbox("Select sheet to analyze", sheet_names)
         df = pd.read_excel(xls, sheet_name=selected_sheet)
-        st.write(f"Loaded rows from '{selected_sheet}':", len(df))
-        st.dataframe(df.head())
 
-        expected_cols = {"Symbol", "Name", "Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type", "Notes"}
-        if not expected_cols.issubset(set(df.columns)):
-            st.error("Uploaded sheet must contain all of the following columns: Symbol, Name, Sector, Industry Group, Industry, Theme, Country, Asset_Type, Notes")
+        expected_cols = ["Symbol", "Name", "Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type", "Notes"]
+        if not set(expected_cols).issubset(df.columns):
+            st.error("Uploaded sheet must contain all of the following columns: " + ", ".join(expected_cols))
             return
 
         df["Symbol"] = df["Symbol"].astype(str).str.strip().str.upper()
-        # Removed Exchange column normalization
-        before_drop = len(df)
         df = df.dropna(subset=["Symbol"]).drop_duplicates("Symbol")
-        st.write(f"Dropped rows: {before_drop - len(df)} after cleaning.")
-        df["YF_Symbol"] = df.apply(lambda row: map_to_yfinance_symbol(row["Symbol"], row["Exchange"]), axis=1)
+        df["YF_Symbol"] = df["Symbol"]  # No need for Exchange logic
+
+        st.write(f"Loaded rows from '{selected_sheet}':", len(df))
+        st.dataframe(df.head())
+
+        min_score = st.sidebar.slider("Min Momentum Score", 0, 100, 50)
+
+        ticker_data = []
+        progress = st.progress(0, text="Fetching ticker data...")
+        total = len(df)
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = [
+                executor.submit(get_ticker_data, row["YF_Symbol"])
+                for _, row in df.iterrows()
+            ]
+            for i, f in enumerate(as_completed(futures)):
+                data = f.result()
+                if data:
+                    ticker_data.append(data)
+                progress.progress((i + 1) / total, text=f"Processed {i + 1}/{total} tickers")
+        progress.empty()
+
+        results_df = pd.DataFrame(ticker_data)
+        if results_df.empty:
+            st.warning("No valid results.")
+            return
+
+        filtered = results_df[results_df["Momentum_Score"] >= min_score].copy()
+        combined = df.set_index("Symbol").join(filtered.set_index("Symbol"), how="inner").reset_index()
+
+        st.metric("Stocks Found", len(combined))
+        st.metric("Avg Momentum Score", round(combined["Momentum_Score"].mean(), 1))
+        st.dataframe(combined.sort_values("Momentum_Score", ascending=False), use_container_width=True)
+
+        csv = combined.to_csv(index=False)
+        st.download_button("Download Results as CSV", data=csv, file_name="momentum_results.csv", mime="text/csv")
     else:
         st.warning("Please upload a .xlsx file with your tickers.")
-        return
-
-    selected_exchange = "All"  # Exchange filtering disabled for new structure
-    min_score = st.sidebar.slider("Min Momentum Score", 0, 100, 50)
-
-    ticker_data = []
-    progress = st.progress(0, text="Fetching ticker data...")
-    total = len(df)
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(get_ticker_data, row["Symbol"], row["Exchange"], row["YF_Symbol"])
-            for _, row in df.iterrows()
-        ]
-        for i, f in enumerate(as_completed(futures)):
-            data = f.result()
-            if data:
-                ticker_data.append(data)
-            progress.progress((i + 1) / total, text=f"Processed {i + 1}/{total} tickers")
-    progress.empty()
-
-    results_df = pd.DataFrame(ticker_data)
-    st.session_state["raw_results_df"] = results_df.copy()
-
-    if not results_df.empty:
-        if selected_exchange != "All":
-            filtered = results_df[
-                (results_df["Momentum_Score"] >= min_score)
-            ].copy()
-        else:
-            filtered = results_df[results_df["Momentum_Score"] >= min_score].copy()
-    else:
-        filtered = pd.DataFrame()
-
-    st.session_state.filtered_results = filtered
-    display_results(filtered)
-
-    if not filtered.empty:
-        csv = filtered.to_csv(index=False)
-        st.download_button("Download Filtered Results as CSV", data=csv, file_name="momentum_scanner_results.csv", mime="text/csv")
-
-        symbol_options = ["— Select a symbol —"] + filtered["Symbol"].tolist()
-        last_selected = st.session_state.get("symbol_select", symbol_options[0])
-        if last_selected not in symbol_options:
-            last_selected = symbol_options[0]
-
-        selected = st.selectbox("Select a symbol for details", options=symbol_options, index=symbol_options.index(last_selected), key="symbol_select")
-        if selected != symbol_options[0]:
-            display_symbol_details(selected)
 
 if __name__ == "__main__":
     main()
