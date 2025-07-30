@@ -1,0 +1,277 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+from datetime import datetime, timedelta
+import numpy as np
+import plotly.graph_objs as go
+
+st.set_page_config(layout="wide")
+st.title("📈 Weekly Price Tracker (Fri–Fri Weeks + Current Week + Scoring)")
+
+uploaded_file = st.file_uploader("Upload your Excel file", type="xlsx")
+
+def get_last_n_weeks(n):
+    today = datetime.today()
+    offset = (today.weekday() - 4) % 7  # 4 = Friday
+    last_friday = today - timedelta(days=offset)
+    weeks = [(last_friday - timedelta(weeks=i) - timedelta(days=4),
+              last_friday - timedelta(weeks=i)) for i in reversed(range(n))]
+    return weeks, last_friday
+
+def fetch_friday_closes(symbol, weeks):
+    start_date, end_date = weeks[0][0], weeks[-1][1]
+    df = yf.download(symbol, start=start_date, end=end_date + timedelta(days=1), interval="1d", progress=False)
+    if df.empty or "Close" not in df.columns:
+        return [np.nan] * len(weeks)
+    closes = []
+    for monday, friday in weeks:
+        week_data = df[(df.index >= monday) & (df.index <= friday)]
+        close = week_data[week_data.index.weekday == 4]["Close"].dropna()
+        if not close.empty:
+            closes.append(float(round(close.iloc[-1], 3)))
+        else:
+            fallback = week_data["Close"].dropna()
+            closes.append(float(round(fallback.iloc[-1], 3)) if not fallback.empty else np.nan)
+    return closes
+
+def fetch_current_week_close(symbol, current_week_start):
+    today = datetime.today()
+    df = yf.download(symbol, start=current_week_start, end=today + timedelta(days=1), interval="1d", progress=False)
+    if df.empty or "Close" not in df.columns:
+        return np.nan
+    closes = df["Close"].dropna()
+    if closes.empty:
+        return np.nan
+    last_close = closes.iloc[-1]
+    return round(float(last_close), 3)
+
+def fetch_intraday_live_price(symbol):
+    try:
+        info = yf.Ticker(symbol).info
+        current_price = info.get("regularMarketPrice")
+        prev_close = info.get("regularMarketPreviousClose")
+        if current_price is not None and prev_close not in (None, 0):
+            pct_change = ((current_price - prev_close) / prev_close) * 100
+        else:
+            pct_change = np.nan
+        return round(current_price, 3), round(pct_change, 2)
+    except Exception as e:
+        return np.nan, np.nan
+
+def calculate_max_drawdown(prices):
+
+def fetch_intraday_live_price(symbol):
+    try:
+        info = yf.Ticker(symbol).info
+        current_price = info.get("regularMarketPrice")
+        prev_close = info.get("regularMarketPreviousClose")
+        if current_price is not None and prev_close not in (None, 0):
+            pct_change = ((current_price - prev_close) / prev_close) * 100
+        else:
+            pct_change = np.nan
+        return round(current_price, 3), round(pct_change, 2)
+    except Exception as e:
+        return np.nan, np.nan
+
+def calculate_max_drawdown(prices):
+    if len(prices) < 2: return 0.0
+    arr = np.array(prices, dtype=np.float64)
+    running_max = np.maximum.accumulate(arr)
+    drawdowns = (arr - running_max) / running_max
+    return drawdowns.min() * 100
+
+if uploaded_file:
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_names = xls.sheet_names
+    sheet_choice = st.selectbox("Select sheet to analyze", [""] + sheet_names)
+
+    if sheet_choice:
+        df = pd.read_excel(xls, sheet_name=sheet_choice)
+        if "Symbol" not in df.columns:
+            st.error("Excel must contain a 'Symbol' column.")
+        else:
+            # ---- SIDEBAR FILTERS ----
+            filter_cols = ["Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type"]
+            for col in filter_cols:
+                if col in df.columns:
+                    unique_vals = df[col].dropna().unique().tolist()
+                    selected_vals = st.sidebar.multiselect(f"Filter by {col}", sorted(unique_vals))
+                    if selected_vals:
+                        df = df[df[col].isin(selected_vals)]
+
+            symbols = df["Symbol"].dropna().unique().tolist()
+            weeks, last_friday = get_last_n_weeks(6)
+            current_week_start = last_friday
+
+            all_data = {}
+intraday_price = {}
+            intraday_change = {}
+
+            for sym in symbols:
+                price, change = fetch_intraday_live_price(sym)
+                intraday_price[sym] = price
+                intraday_change[sym] = change
+            for sym in symbols:
+                closes = fetch_friday_closes(sym, weeks)
+                current = fetch_current_week_close(sym, current_week_start)
+                all_data[sym] = closes + [current]
+
+            if all_data:
+                live_pct_change = {}
+                for sym in all_data:
+                    last_friday_close = all_data[sym][-2] if len(all_data[sym]) >= 2 else np.nan
+                    current_price = all_data[sym][-1]
+                    if pd.notna(last_friday_close) and pd.notna(current_price) and last_friday_close != 0:
+                        live_change = ((current_price - last_friday_close) / last_friday_close) * 100
+                    else:
+                        live_change = np.nan
+                    live_pct_change[sym] = round(live_change, 2)
+
+                live_pct_df = pd.DataFrame.from_dict(live_pct_change, orient='index', columns=["Live % Change"])
+                live_pct_df = live_pct_df.reset_index().rename(columns={"index": "Symbol"})
+
+                labels = [f"{m.strftime('%b %d')}→{f.strftime('%b %d')}" for m, f in weeks]
+                labels += [f"{current_week_start.strftime('%b %d')}→{datetime.today().strftime('%b %d')}"]
+                price_df = pd.DataFrame(all_data).T
+                price_df.columns = labels
+                price_df.index.name = "Symbol"
+                price_df = price_df.reset_index()
+
+                for col in labels:
+                    price_df[col] = pd.to_numeric(price_df[col], errors="coerce")
+
+                norm_df = price_df.set_index("Symbol")[labels]
+                safe_norm = norm_df.copy()
+                safe_norm = safe_norm.where(norm_df.iloc[:, 0] != 0)
+                normed = safe_norm.div(norm_df.iloc[:, 0], axis=0)
+
+                weekly_pct = norm_df.pct_change(axis=1) * 100
+
+                if weekly_pct.columns[-1].split("→")[0] == weekly_pct.columns[-1].split("→")[1] or weekly_pct.iloc[:, -1].nunique() <= 1:
+                    weekly_pct = weekly_pct.iloc[:, :-1]
+                    norm_df = norm_df.iloc[:, :-1]
+                    normed = normed.iloc[:, :-1]
+                    labels = labels[:-1]
+
+                start_values = norm_df.iloc[:, 0]
+                last_values = norm_df.iloc[:, -1]
+                total_pct_change = ((last_values - start_values) / start_values) * 100
+                top_n = 20
+                top_symbols = total_pct_change.sort_values(ascending=False).head(top_n).index.tolist()
+                pct_change_from_start = norm_df.subtract(start_values, axis=0).divide(start_values, axis=0) * 100
+
+                price_df = price_df.merge(live_pct_df, on="Symbol", how="left")
+intraday_df = pd.DataFrame({
+                    "Symbol": list(intraday_price.keys()),
+                    "Live Price": list(intraday_price.values()),
+                    "Intraday % Change": list(intraday_change.values())
+                })
+
+                price_df = price_df.merge(intraday_df, on="Symbol", how="left")
+
+                tabs = st.tabs([
+                    "📈 Price Trend",
+                    "📊 Normalized Performance",
+                    "📈 % Weekly Change",
+                    "🎯 Ticker Scores",
+                    "📉 Max Drawdown",
+                    "📉 Volatility"
+                ])
+
+                with tabs[0]:
+                    st.subheader("📈 Price Trend")
+                    fig = go.Figure()
+                    for sym in top_symbols:
+                        fig.add_trace(go.Scatter(
+                            x=labels,
+                            y=norm_df.loc[sym],
+                            customdata=pct_change_from_start.loc[sym].values.reshape(-1, 1),
+                            mode='lines+markers',
+                            name=sym,
+                            text=[sym] * len(labels),
+                            hovertemplate="<b>%{text}</b><br>Price: %{y:.2f}<br>Change: %{customdata[0]:.2f}%"
+                        ))
+                    fig.update_layout(hovermode="x unified", height=500, title="Price Trend — Top 20 by Return")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with tabs[1]:
+                    st.subheader("📊 Normalized Performance (Start = 100)")
+                    norm_chart = go.Figure()
+                    normed_pct_change = norm_df.divide(start_values, axis=0) * 100
+                    for sym in top_symbols:
+                        change = total_pct_change[sym]
+                        label_name = f"{sym} ({change:+.2f}%)"
+                        norm_chart.add_trace(go.Scatter(
+                            x=labels,
+                            y=normed_pct_change.loc[sym],
+                            customdata=pct_change_from_start.loc[sym].values.reshape(-1, 1),
+                            mode="lines",
+                            name=label_name,
+                            text=[label_name] * len(labels),
+                            hovertemplate="<b>%{text}</b><br>Normalized: %{y:.2f}<br>Change: %{customdata[0]:.2f}%"
+                        ))
+                    norm_chart.update_layout(hovermode="closest", height=500, title="Normalized — Top 20 by Return")
+                    st.plotly_chart(norm_chart, use_container_width=True)
+
+                with tabs[2]:
+                    st.subheader("📈 Weekly % Change")
+                    st.dataframe(weekly_pct.round(2).reset_index(), use_container_width=True)
+
+                with tabs[3]:
+                    st.subheader("🎯 Ticker Scores")
+                    scores = pd.DataFrame(index=norm_df.index)
+                    scores["Momentum"] = (norm_df.iloc[:, -1] - norm_df.iloc[:, -2]).fillna(0)
+                    scores["Volatility"] = norm_df.std(axis=1).fillna(0)
+                    scores["Trend"] = norm_df.apply(lambda row: sum(row.diff().fillna(0) > 0), axis=1)
+                    scores["Total Return (%)"] = ((norm_df.iloc[:, -1] - norm_df.iloc[:, 0]) / norm_df.iloc[:, 0] * 100).fillna(0)
+                    scores["All-Around"] = scores.sum(axis=1)
+
+                    metadata_cols = ["Name", "Sector", "Industry Group", "Industry", "Theme", "Country", "Asset_Type", "Notes"]
+                    available_cols = [col for col in metadata_cols if col in df.columns]
+                    missing_cols = [col for col in metadata_cols if col not in df.columns]
+                    if missing_cols:
+                        st.warning(f"Missing metadata columns: {missing_cols}")
+                    meta = df.set_index("Symbol")[available_cols].copy()
+                    combined_scores = meta.join(scores, how="right")
+
+                    st.dataframe(combined_scores.round(2).sort_values("All-Around", ascending=False).reset_index(), use_container_width=True)
+
+                with tabs[4]:
+                    st.subheader("📉 Max Drawdown")
+                    drawdowns = norm_df.loc[top_symbols].apply(lambda row: calculate_max_drawdown(row.dropna()), axis=1).dropna()
+                    fig = go.Figure(go.Bar(x=drawdowns.index, y=drawdowns.values, marker_color="crimson",
+                                           hovertemplate="%{x}<br>Drawdown: %{y:.2f}%"))
+                    fig.update_layout(title="Drawdown (%) — Top 20 by Return", yaxis_title="Drawdown", height=500)
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.dataframe(drawdowns.rename("Drawdown (%)").round(2).reset_index(), use_container_width=True)
+
+                with tabs[5]:
+                with st.expander("📊 Composition Breakdown (Pie Charts)"):
+                    if "Sector" in df.columns:
+                        sector_counts = df["Sector"].value_counts()
+                        fig = go.Figure(data=[go.Pie(labels=sector_counts.index, values=sector_counts.values, hole=.3)])
+                        fig.update_layout(title_text="Sector Distribution")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    if "Industry Group" in df.columns:
+                        ind_group_counts = df["Industry Group"].value_counts()
+                        fig = go.Figure(data=[go.Pie(labels=ind_group_counts.index, values=ind_group_counts.values, hole=.3)])
+                        fig.update_layout(title_text="Industry Group Distribution")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    if "Industry" in df.columns:
+                        industry_counts = df["Industry"].value_counts()
+                        fig = go.Figure(data=[go.Pie(labels=industry_counts.index, values=industry_counts.values, hole=.3)])
+                        fig.update_layout(title_text="Industry Distribution")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    st.subheader("📉 Volatility (Standard Deviation of Weekly % Change)")
+                    volatility = weekly_pct.std(axis=1).fillna(0)
+                    st.dataframe(volatility.rename("Volatility (%)").round(2).reset_index(), use_container_width=True)
+
+                    with st.expander("📌 Live Intraday Data"):
+                        st.dataframe(
+                            price_df[["Symbol", "Live Price", "Intraday % Change", "Live % Change"]]
+                            .sort_values("Intraday % Change", ascending=False),
+                            use_container_width=True
+                        )
