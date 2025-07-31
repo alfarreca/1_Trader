@@ -36,6 +36,8 @@ def load_data(ticker, start_date, end_date):
         if data.empty:
             st.error("No data found for this ticker and date range.")
             return None
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
         return data
     except Exception as e:
         st.error(f"Error fetching data: {e}")
