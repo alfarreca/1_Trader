@@ -20,45 +20,66 @@ def load_data(ticker, start_date, end_date):
         data = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1))
         return data if not data.empty else None
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error loading data: {str(e)}")
         return None
 
 # ===== Swing Point Detection =====
 def detect_swings(data):
-    highs = data['High']
-    lows = data['Low']
+    try:
+        highs = data['High']
+        lows = data['Low']
+        
+        # Find swing highs (peak values)
+        swing_highs = highs[(highs.shift(1) < highs) & (highs > highs.shift(-1))]
+        # Find swing lows (trough values)
+        swing_lows = lows[(lows.shift(1) > lows) & (lows < lows.shift(-1))]
+        
+        if len(swing_highs) > 0 and len(swing_lows) > 0:
+            # Get the most recent swing high
+            latest_high = swing_highs[-1]
+            # Get the most recent swing low before the high
+            valid_lows = swing_lows[swing_lows.index < swing_highs.index[-1]]
+            latest_low = valid_lows[-1] if len(valid_lows) > 0 else swing_lows[-1]
+            
+            return latest_high, latest_low
+        
+        # Fallback to recent max/min if no swings detected
+        return highs.max(), lows.min()
     
-    # Find swing highs (peak values)
-    swing_highs = highs[(highs.shift(1) < highs) & (highs > highs.shift(-1))]
-    # Find swing lows (trough values)
-    swing_lows = lows[(lows.shift(1) > lows) & (lows < lows.shift(-1))]
-    
-    if len(swing_highs) > 0 and len(swing_lows) > 0:
-        return swing_highs[-1], swing_lows[swing_lows.index < swing_highs.index[-1]][-1]
-    return highs.max(), lows.min()
+    except Exception as e:
+        st.error(f"Error detecting swings: {str(e)}")
+        if len(data) > 0:
+            return data['High'].max(), data['Low'].min()
+        return 0, 0  # Default values if all else fails
 
 # ===== Fibonacci Calculation =====
 def calculate_fib_levels(high, low):
-    diff = high - low
-    return {
-        '0%': high,
-        '23.6%': high - diff * 0.236,
-        '38.2%': high - diff * 0.382,
-        '50%': high - diff * 0.5,
-        '61.8%': high - diff * 0.618,
-        '78.6%': high - diff * 0.786,
-        '100%': low,
-        '161.8%': high - diff * 1.618
-    }
+    try:
+        diff = high - low
+        return {
+            '0%': high,
+            '23.6%': high - diff * 0.236,
+            '38.2%': high - diff * 0.382,
+            '50%': high - diff * 0.5,
+            '61.8%': high - diff * 0.618,
+            '78.6%': high - diff * 0.786,
+            '100%': low,
+            '161.8%': high - diff * 1.618
+        }
+    except:
+        return {}
 
 # ===== User Interface =====
 with st.sidebar:
     st.header("Settings")
     ticker = st.text_input("Stock Ticker", "AAPL").upper()
-    start_date = st.date_input("Start Date", datetime.today() - timedelta(days=180))
-    end_date = st.date_input("End Date", datetime.today())
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", datetime.today() - timedelta(days=180))
+    with col2:
+        end_date = st.date_input("End Date", datetime.today())
     
-    analysis_mode = st.radio("Analysis Mode", ["Manual", "Auto-Detect"], index=1)
+    analysis_mode = st.radio("Analysis Mode", ["Auto-Detect", "Manual"], index=0)
     
     if analysis_mode == "Manual":
         st.subheader("Manual Swing Points")
@@ -81,7 +102,7 @@ if data is not None:
         if swing_high > 0 and swing_low > 0:
             st.success(f"Using manual swings: High={swing_high:.2f}, Low={swing_low:.2f}")
         else:
-            st.warning("Enter both swing prices for manual mode")
+            st.warning("Using last available prices as default")
             swing_high, swing_low = data['High'].max(), data['Low'].min()
 
     # Calculate Fibonacci levels
@@ -89,8 +110,11 @@ if data is not None:
     
     # Display Fibonacci table
     with st.expander("Fibonacci Levels", expanded=True):
-        fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
-        st.dataframe(fib_df.style.format({'Price': '{:.2f}'}), use_container_width=True)
+        if fib_levels:
+            fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
+            st.dataframe(fib_df.style.format({'Price': '{:.2f}'}), use_container_width=True)
+        else:
+            st.warning("Could not calculate Fibonacci levels")
 
     # ===== Interactive Chart =====
     fig = go.Figure()
@@ -106,31 +130,33 @@ if data is not None:
     ))
     
     # Swing points markers
-    fig.add_trace(go.Scatter(
-        x=[data.index[-1]],
-        y=[swing_high],
-        mode='markers',
-        marker=dict(color='green', size=12),
-        name='Swing High'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=[data.index[-1]],
-        y=[swing_low],
-        mode='markers',
-        marker=dict(color='red', size=12),
-        name='Swing Low'
-    ))
+    if swing_high > 0 and swing_low > 0:
+        fig.add_trace(go.Scatter(
+            x=[data.index[-1]],
+            y=[swing_high],
+            mode='markers',
+            marker=dict(color='green', size=12),
+            name='Swing High'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=[data.index[-1]],
+            y=[swing_low],
+            mode='markers',
+            marker=dict(color='red', size=12),
+            name='Swing Low'
+        ))
     
     # Fibonacci levels
-    for level, price in fib_levels.items():
-        fig.add_hline(
-            y=price,
-            line_dash="dot",
-            line_color="purple",
-            annotation_text=f"{level} ({price:.2f})",
-            annotation_position="right"
-        )
+    if fib_levels:
+        for level, price in fib_levels.items():
+            fig.add_hline(
+                y=price,
+                line_dash="dot",
+                line_color="purple",
+                annotation_text=f"{level} ({price:.2f})",
+                annotation_position="right"
+            )
     
     fig.update_layout(
         title=f"{ticker} Fibonacci Retracements",
@@ -142,14 +168,13 @@ if data is not None:
     st.plotly_chart(fig, use_container_width=True)
 
     # ===== Data Export =====
-    st.download_button(
-        label="Download Fibonacci Levels",
-        data=pd.DataFrame(fib_levels.items(), columns=['Level', 'Price']).to_csv().encode('utf-8'),
-        file_name=f"{ticker}_fib_levels.csv",
-        mime="text/csv"
-    )
-else:
-    st.error("Couldn't load data. Check your inputs and try again.")
+    if fib_levels:
+        st.download_button(
+            label="Download Fibonacci Levels",
+            data=pd.DataFrame(fib_levels.items(), columns=['Level', 'Price']).to_csv(index=False).encode('utf-8'),
+            file_name=f"{ticker}_fib_levels.csv",
+            mime="text/csv"
+        )
 
 st.markdown("---")
 st.caption("Tip: In manual mode, check the raw data below to find exact swing point values")
