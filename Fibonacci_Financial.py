@@ -4,155 +4,155 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-# App title and description
-st.title('Fibonacci Financial Analyzer')
-st.write("""
-This app retrieves stock data, calculates Fibonacci retracement levels, 
-and visualizes them on an interactive price chart.
+# Configure the app
+st.set_page_config(layout="wide")
+st.title("🎯 Fibonacci Retracement Tool")
+st.markdown("""
+**Manual Mode**: Set exact swing points  
+**Auto Mode**: Let the app detect swings  
+*Tip: Zoom in on the chart to fine-tune manual selections*
 """)
 
-# Sidebar inputs
-st.sidebar.header('User Input Parameters')
-
-def get_user_input():
-    """Get user inputs from the sidebar"""
-    ticker = st.sidebar.text_input('Stock Ticker (e.g., AAPL)', 'AAPL')
-    
-    # Date range selection
-    end_date = st.sidebar.date_input('End Date', datetime.today())
-    start_date = st.sidebar.date_input('Start Date', end_date - timedelta(days=365))
-    
-    # Fibonacci swing selection
-    st.sidebar.subheader('Fibonacci Swing Points')
-    swing_high = st.sidebar.number_input('Swing High Price', value=0.0)
-    swing_low = st.sidebar.number_input('Swing Low Price', value=0.0)
-    
-    # Additional settings
-    st.sidebar.subheader('Chart Settings')
-    show_volume = st.sidebar.checkbox('Show Volume', True)
-    chart_style = st.sidebar.selectbox('Chart Style', ['Candlestick', 'Line'])
-    
-    return {
-        'ticker': ticker.upper(),
-        'start_date': start_date,
-        'end_date': end_date,
-        'swing_high': swing_high,
-        'swing_low': swing_low,
-        'show_volume': show_volume,
-        'chart_style': chart_style
-    }
-
-user_input = get_user_input()
-
-@st.cache_data(ttl=3600)  # Cache data for 1 hour
+# ===== Data Loading =====
+@st.cache_data(ttl=3600)
 def load_data(ticker, start_date, end_date):
-    """Load stock data from yfinance"""
     try:
-        data = yf.download(ticker, start=start_date, end=end_date)
-        if data.empty:
-            st.error("No data found for this ticker and date range.")
-            return None
-        return data
+        data = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1))
+        return data if not data.empty else None
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
+        st.error(f"Error: {e}")
         return None
 
-# Load data
-data = load_data(user_input['ticker'], user_input['start_date'], user_input['end_date'])
+# ===== Swing Point Detection =====
+def detect_swings(data):
+    highs = data['High']
+    lows = data['Low']
+    
+    # Find swing highs (peak values)
+    swing_highs = highs[(highs.shift(1) < highs) & (highs > highs.shift(-1))]
+    # Find swing lows (trough values)
+    swing_lows = lows[(lows.shift(1) > lows) & (lows < lows.shift(-1))]
+    
+    if len(swing_highs) > 0 and len(swing_lows) > 0:
+        return swing_highs[-1], swing_lows[swing_lows.index < swing_highs.index[-1]][-1]
+    return highs.max(), lows.min()
+
+# ===== Fibonacci Calculation =====
+def calculate_fib_levels(high, low):
+    diff = high - low
+    return {
+        '0%': high,
+        '23.6%': high - diff * 0.236,
+        '38.2%': high - diff * 0.382,
+        '50%': high - diff * 0.5,
+        '61.8%': high - diff * 0.618,
+        '78.6%': high - diff * 0.786,
+        '100%': low,
+        '161.8%': high - diff * 1.618
+    }
+
+# ===== User Interface =====
+with st.sidebar:
+    st.header("Settings")
+    ticker = st.text_input("Stock Ticker", "AAPL").upper()
+    start_date = st.date_input("Start Date", datetime.today() - timedelta(days=180))
+    end_date = st.date_input("End Date", datetime.today())
+    
+    analysis_mode = st.radio("Analysis Mode", ["Manual", "Auto-Detect"], index=1)
+    
+    if analysis_mode == "Manual":
+        st.subheader("Manual Swing Points")
+        manual_high = st.number_input("Swing High Price", value=0.0, step=0.01)
+        manual_low = st.number_input("Swing Low Price", value=0.0, step=0.01)
+    else:
+        st.subheader("Auto-Detect Settings")
+        lookback = st.slider("Swing Sensitivity (days)", 5, 60, 20)
+
+# ===== Main Execution =====
+data = load_data(ticker, start_date, end_date)
 
 if data is not None:
-    # Calculate Fibonacci levels if swing points are provided
-    if user_input['swing_high'] > 0 and user_input['swing_low'] > 0:
-        swing_diff = user_input['swing_high'] - user_input['swing_low']
-        fib_levels = {
-            '0%': user_input['swing_high'],
-            '23.6%': user_input['swing_high'] - swing_diff * 0.236,
-            '38.2%': user_input['swing_high'] - swing_diff * 0.382,
-            '50%': user_input['swing_high'] - swing_diff * 0.5,
-            '61.8%': user_input['swing_high'] - swing_diff * 0.618,
-            '78.6%': user_input['swing_high'] - swing_diff * 0.786,
-            '100%': user_input['swing_low']
-        }
-        
-        # Display Fibonacci levels
-        st.subheader('Fibonacci Retracement Levels')
-        fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
-        st.dataframe(fib_df.style.format({'Price': '{:.2f}'}))
+    # Get swing points based on selected mode
+    if analysis_mode == "Auto-Detect":
+        swing_high, swing_low = detect_swings(data[-lookback:])
+        st.success(f"Auto-detected swings: High={swing_high:.2f}, Low={swing_low:.2f}")
     else:
-        st.warning("Enter both Swing High and Swing Low prices to calculate Fibonacci levels.")
-        fib_levels = None
+        swing_high, swing_low = manual_high, manual_low
+        if swing_high > 0 and swing_low > 0:
+            st.success(f"Using manual swings: High={swing_high:.2f}, Low={swing_low:.2f}")
+        else:
+            st.warning("Enter both swing prices for manual mode")
+            swing_high, swing_low = data['High'].max(), data['Low'].min()
+
+    # Calculate Fibonacci levels
+    fib_levels = calculate_fib_levels(swing_high, swing_low)
     
-    # Create the price chart
-    st.subheader(f"{user_input['ticker']} Price Chart")
-    
+    # Display Fibonacci table
+    with st.expander("Fibonacci Levels", expanded=True):
+        fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
+        st.dataframe(fib_df.style.format({'Price': '{:.2f}'}), use_container_width=True)
+
+    # ===== Interactive Chart =====
     fig = go.Figure()
     
-    if user_input['chart_style'] == 'Candlestick':
-        fig.add_trace(go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name='Price'
-        ))
-    else:
-        fig.add_trace(go.Scatter(
-            x=data.index,
-            y=data['Close'],
-            mode='lines',
-            name='Price'
-        ))
+    # Price chart
+    fig.add_trace(go.Candlestick(
+        x=data.index,
+        open=data['Open'],
+        high=data['High'],
+        low=data['Low'],
+        close=data['Close'],
+        name='Price'
+    ))
     
-    # Add Fibonacci levels if available
-    if fib_levels:
-        for level, price in fib_levels.items():
-            fig.add_hline(y=price, line_dash="dot", 
-                         annotation_text=f"Fib {level} ({price:.2f})", 
-                         line_color="purple")
+    # Swing points markers
+    fig.add_trace(go.Scatter(
+        x=[data.index[-1]],
+        y=[swing_high],
+        mode='markers',
+        marker=dict(color='green', size=12),
+        name='Swing High'
+    ))
     
-    # Add volume if selected
-    if user_input['show_volume']:
-        fig.add_trace(go.Bar(
-            x=data.index,
-            y=data['Volume'],
-            name='Volume',
-            yaxis='y2',
-            marker_color='rgba(100, 100, 255, 0.3)'
-        ))
+    fig.add_trace(go.Scatter(
+        x=[data.index[-1]],
+        y=[swing_low],
+        mode='markers',
+        marker=dict(color='red', size=12),
+        name='Swing Low'
+    ))
     
-    # Update layout
-    fig.update_layout(
-        title=f"{user_input['ticker']} Price from {user_input['start_date']} to {user_input['end_date']}",
-        yaxis_title='Price',
-        xaxis_rangeslider_visible=False,
-        hovermode='x unified',
-        height=600,
-        margin=dict(l=50, r=50, b=50, t=50, pad=4)
-    )
-    
-    if user_input['show_volume']:
-        fig.update_layout(
-            yaxis2=dict(
-                title="Volume",
-                overlaying="y",
-                side="right",
-                showgrid=False
-            )
+    # Fibonacci levels
+    for level, price in fib_levels.items():
+        fig.add_hline(
+            y=price,
+            line_dash="dot",
+            line_color="purple",
+            annotation_text=f"{level} ({price:.2f})",
+            annotation_position="right"
         )
     
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(
+        title=f"{ticker} Fibonacci Retracements",
+        height=700,
+        xaxis_rangeslider_visible=False,
+        showlegend=True
+    )
     
-    # Show raw data if desired
-    if st.checkbox('Show Raw Data'):
-        st.subheader('Raw Data')
-        st.write(data)
-else:
-    st.error("Failed to load data. Please check your inputs and try again.")
+    st.plotly_chart(fig, use_container_width=True)
 
-# Footer
-st.markdown("""
----
-**Note:** This app is for educational purposes only. Financial data may be delayed. 
-Fibonacci levels are calculated based on user-provided swing points.
-""")
+    # ===== Data Export =====
+    st.download_button(
+        label="Download Fibonacci Levels",
+        data=pd.DataFrame(fib_levels.items(), columns=['Level', 'Price']).to_csv().encode('utf-8'),
+        file_name=f"{ticker}_fib_levels.csv",
+        mime="text/csv"
+    )
+else:
+    st.error("Couldn't load data. Check your inputs and try again.")
+
+st.markdown("---")
+st.caption("Tip: In manual mode, check the raw data below to find exact swing point values")
+
+if data is not None and st.checkbox("Show Raw Data"):
+    st.dataframe(data.sort_index(ascending=False))
