@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 # App title and description
 st.title('Fibonacci Financial Analyzer')
 st.write("""
-This app retrieves stock data, calculates Fibonacci retracement levels, 
-and visualizes them on an interactive price chart.
+This app retrieves stock data and allows you to analyze Fibonacci retracement levels.
+First view the price chart, then identify and input swing points for Fibonacci analysis.
 """)
 
 # Sidebar inputs
@@ -22,12 +22,7 @@ def get_user_input():
     end_date = st.sidebar.date_input('End Date', datetime.today())
     start_date = st.sidebar.date_input('Start Date', end_date - timedelta(days=365))
     
-    # Fibonacci swing selection
-    st.sidebar.subheader('Fibonacci Swing Points')
-    swing_high = st.sidebar.number_input('Swing High Price', value=0.0)
-    swing_low = st.sidebar.number_input('Swing Low Price', value=0.0)
-    
-    # Additional settings
+    # Chart settings
     st.sidebar.subheader('Chart Settings')
     show_volume = st.sidebar.checkbox('Show Volume', True)
     chart_style = st.sidebar.selectbox('Chart Style', ['Candlestick', 'Line'])
@@ -36,8 +31,6 @@ def get_user_input():
         'ticker': ticker.upper(),
         'start_date': start_date,
         'end_date': end_date,
-        'swing_high': swing_high,
-        'swing_low': swing_low,
         'show_volume': show_volume,
         'chart_style': chart_style
     }
@@ -61,27 +54,6 @@ def load_data(ticker, start_date, end_date):
 data = load_data(user_input['ticker'], user_input['start_date'], user_input['end_date'])
 
 if data is not None:
-    # Calculate Fibonacci levels if swing points are provided
-    if user_input['swing_high'] > 0 and user_input['swing_low'] > 0:
-        swing_diff = user_input['swing_high'] - user_input['swing_low']
-        fib_levels = {
-            '0%': user_input['swing_high'],
-            '23.6%': user_input['swing_high'] - swing_diff * 0.236,
-            '38.2%': user_input['swing_high'] - swing_diff * 0.382,
-            '50%': user_input['swing_high'] - swing_diff * 0.5,
-            '61.8%': user_input['swing_high'] - swing_diff * 0.618,
-            '78.6%': user_input['swing_high'] - swing_diff * 0.786,
-            '100%': user_input['swing_low']
-        }
-        
-        # Display Fibonacci levels
-        st.subheader('Fibonacci Retracement Levels')
-        fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
-        st.dataframe(fib_df.style.format({'Price': '{:.2f}'}))
-    else:
-        st.warning("Enter both Swing High and Swing Low prices to calculate Fibonacci levels.")
-        fib_levels = None
-    
     # Create the price chart
     st.subheader(f"{user_input['ticker']} Price Chart")
     
@@ -103,13 +75,6 @@ if data is not None:
             mode='lines',
             name='Price'
         ))
-    
-    # Add Fibonacci levels if available
-    if fib_levels:
-        for level, price in fib_levels.items():
-            fig.add_hline(y=price, line_dash="dot", 
-                         annotation_text=f"Fib {level} ({price:.2f})", 
-                         line_color="purple")
     
     # Add volume if selected
     if user_input['show_volume']:
@@ -147,12 +112,55 @@ if data is not None:
     if st.checkbox('Show Raw Data'):
         st.subheader('Raw Data')
         st.write(data)
+        
+    # Fibonacci analysis section (after the chart)
+    st.subheader('Fibonacci Analysis')
+    st.write("After analyzing the chart above, enter the swing points below to calculate Fibonacci retracement levels.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        swing_high = st.number_input('Swing High Price', value=float(data['High'].max()))
+    with col2:
+        swing_low = st.number_input('Swing Low Price', value=float(data['Low'].min()))
+    
+    if swing_high > 0 and swing_low > 0 and swing_high > swing_low:
+        swing_diff = swing_high - swing_low
+        fib_levels = {
+            '0%': swing_high,
+            '23.6%': swing_high - swing_diff * 0.236,
+            '38.2%': swing_high - swing_diff * 0.382,
+            '50%': swing_high - swing_diff * 0.5,
+            '61.8%': swing_high - swing_diff * 0.618,
+            '78.6%': swing_high - swing_diff * 0.786,
+            '100%': swing_low
+        }
+        
+        # Display Fibonacci levels
+        st.subheader('Fibonacci Retracement Levels')
+        fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
+        st.dataframe(fib_df.style.format({'Price': '{:.2f}'}))
+        
+        # Create Fibonacci chart
+        st.subheader('Price Chart with Fibonacci Levels')
+        fib_fig = go.Figure(fig)  # Start with original chart
+        
+        # Add Fibonacci levels
+        for level, price in fib_levels.items():
+            fib_fig.add_hline(y=price, line_dash="dot", 
+                             annotation_text=f"Fib {level} ({price:.2f})", 
+                             line_color="purple")
+        
+        st.plotly_chart(fib_fig, use_container_width=True)
+    elif swing_high > 0 and swing_low > 0:
+        st.error("Swing High must be greater than Swing Low")
+    else:
+        st.info("Enter both Swing High and Swing Low prices to calculate Fibonacci levels.")
+    
 else:
     st.error("Failed to load data. Please check your inputs and try again.")
 
 # Footer
 st.markdown("""
 ---
-**Note:** This app is for educational purposes only. Financial data may be delayed. 
-Fibonacci levels are calculated based on user-provided swing points.
+**Note:** This app is for educational purposes only. Financial data may be delayed.
 """)
