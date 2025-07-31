@@ -51,10 +51,8 @@ def detect_swings(data, window=10):
         return None, None
     highs = data['High'].rolling(window, center=True).max()
     lows = data['Low'].rolling(window, center=True).min()
-    # Recent swing high: last local maximum
     swing_high = data['High'][(data['High'] == highs) & (~highs.isna())].dropna()
     swing_low = data['Low'][(data['Low'] == lows) & (~lows.isna())].dropna()
-    # Take the most recent in the window
     recent_high = swing_high[-1] if not swing_high.empty else float(data['High'].max())
     recent_low = swing_low[-1] if not swing_low.empty else float(data['Low'].min())
     return float(recent_high), float(recent_low)
@@ -87,13 +85,17 @@ if data is not None:
             name='Price'
         ))
 
+    # --- Dynamic volume bar colors ---
     if user_input['show_volume']:
+        vol_colors = ['#00B050' if close >= open_ else '#FF4B4B'
+                      for close, open_ in zip(data['Close'], data['Open'])]
         fig.add_trace(go.Bar(
             x=data.index,
             y=data['Volume'],
             name='Volume',
             yaxis='y2',
-            marker_color='rgba(100, 100, 255, 0.3)'
+            marker_color=vol_colors,
+            opacity=0.5
         ))
 
     fig.update_layout(
