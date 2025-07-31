@@ -101,139 +101,143 @@ if st.button("Run Analysis", type="primary"):
     if data is not None and not data.empty:
         # --- Step 1: Auto-detect swings and show initial chart ---
         swing_high, swing_low = detect_swings(data, sensitivity or 20)
-        fib_levels = calculate_fib_levels(swing_high, swing_low)
-        st.info(f"Auto-detected swings | High: {swing_high:.2f} | Low: {swing_low:.2f}")
+        if swing_high is not None and swing_low is not None and swing_high > swing_low:
+            fib_levels = calculate_fib_levels(swing_high, swing_low)
+            st.info(f"Auto-detected swings | High: {swing_high:.2f} | Low: {swing_low:.2f}")
 
-        # ----- Chart plotting -----
-        fib_colors = {
-            '0%': 'purple',
-            '23.6%': 'blue',
-            '38.2%': 'teal',
-            '50%': 'orange',
-            '61.8%': 'gold',
-            '78.6%': 'magenta',
-            '100%': 'red',
-            '161.8%': 'green'
-        }
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name='Price'
-        ))
-        fig.add_trace(go.Scatter(
-            x=[data.index[-1]],
-            y=[swing_high],
-            mode='markers',
-            marker=dict(color='green', size=12, symbol='triangle-down'),
-            name='Swing High'
-        ))
-        fig.add_trace(go.Scatter(
-            x=[data.index[-1]],
-            y=[swing_low],
-            mode='markers',
-            marker=dict(color='red', size=12, symbol='triangle-up'),
-            name='Swing Low'
-        ))
-        for level, price in fib_levels.items():
-            color = fib_colors.get(level, 'purple')
-            fig.add_hline(
-                y=price,
-                line_dash="dot",
-                line_color=color,
-                annotation_text=f"{level}",
-                annotation_position="right"
+            # ----- Chart plotting -----
+            fib_colors = {
+                '0%': 'purple',
+                '23.6%': 'blue',
+                '38.2%': 'teal',
+                '50%': 'orange',
+                '61.8%': 'gold',
+                '78.6%': 'magenta',
+                '100%': 'red',
+                '161.8%': 'green'
+            }
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(
+                x=data.index,
+                open=data['Open'],
+                high=data['High'],
+                low=data['Low'],
+                close=data['Close'],
+                name='Price'
+            ))
+            fig.add_trace(go.Scatter(
+                x=[data.index[-1]],
+                y=[swing_high],
+                mode='markers',
+                marker=dict(color='green', size=12, symbol='triangle-down'),
+                name='Swing High'
+            ))
+            fig.add_trace(go.Scatter(
+                x=[data.index[-1]],
+                y=[swing_low],
+                mode='markers',
+                marker=dict(color='red', size=12, symbol='triangle-up'),
+                name='Swing Low'
+            ))
+            for level, price in fib_levels.items():
+                color = fib_colors.get(level, 'purple')
+                fig.add_hline(
+                    y=price,
+                    line_dash="dot",
+                    line_color=color,
+                    annotation_text=f"{level}",
+                    annotation_position="right"
+                )
+            fig.update_layout(
+                title=f"{ticker} Price with Fibonacci Levels",
+                height=700,
+                xaxis_rangeslider_visible=False,
+                showlegend=True
             )
-        fig.update_layout(
-            title=f"{ticker} Price with Fibonacci Levels",
-            height=700,
-            xaxis_rangeslider_visible=False,
-            showlegend=True
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        with st.expander("📝 Fibonacci Levels", expanded=True):
-            fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
-            st.dataframe(
-                fib_df.style.format({'Price': '{:.2f}'}),
-                use_container_width=True
-            )
-            csv = fib_df.reset_index().to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Levels",
-                data=csv,
-                file_name=f"{ticker}_fib_levels.csv",
-                mime="text/csv"
-            )
-        with st.expander("🔍 View Raw Data"):
-            st.dataframe(data.sort_index(ascending=False))
+            st.plotly_chart(fig, use_container_width=True)
+            with st.expander("📝 Fibonacci Levels", expanded=True):
+                fib_df = pd.DataFrame.from_dict(fib_levels, orient='index', columns=['Price'])
+                st.dataframe(
+                    fib_df.style.format({'Price': '{:.2f}'}),
+                    use_container_width=True
+                )
+                csv = fib_df.reset_index().to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Levels",
+                    data=csv,
+                    file_name=f"{ticker}_fib_levels.csv",
+                    mime="text/csv"
+                )
+            with st.expander("🔍 View Raw Data"):
+                st.dataframe(data.sort_index(ascending=False))
 
-        # --- Step 2: If Manual mode, prompt for swing points below the chart ---
-        if analysis_mode == "Manual":
-            st.subheader("Manual Swing Points")
-            with st.form("manual_swings_form"):
-                manual_high = st.number_input("Swing High Price", value=float(swing_high), step=0.01, min_value=0.0)
-                manual_low = st.number_input("Swing Low Price", value=float(swing_low), step=0.01, min_value=0.0)
-                submitted = st.form_submit_button("Update with Manual Swings")
-            if submitted:
-                if manual_high > manual_low > 0:
-                    fib_levels_manual = calculate_fib_levels(manual_high, manual_low)
-                    st.success(f"Manual swings | High: {manual_high:.2f} | Low: {manual_low:.2f}")
-                    # Redraw chart with manual swings
-                    fig_manual = go.Figure()
-                    fig_manual.add_trace(go.Candlestick(
-                        x=data.index,
-                        open=data['Open'],
-                        high=data['High'],
-                        low=data['Low'],
-                        close=data['Close'],
-                        name='Price'
-                    ))
-                    fig_manual.add_trace(go.Scatter(
-                        x=[data.index[-1]],
-                        y=[manual_high],
-                        mode='markers',
-                        marker=dict(color='green', size=12, symbol='triangle-down'),
-                        name='Swing High'
-                    ))
-                    fig_manual.add_trace(go.Scatter(
-                        x=[data.index[-1]],
-                        y=[manual_low],
-                        mode='markers',
-                        marker=dict(color='red', size=12, symbol='triangle-up'),
-                        name='Swing Low'
-                    ))
-                    for level, price in fib_levels_manual.items():
-                        color = fib_colors.get(level, 'purple')
-                        fig_manual.add_hline(
-                            y=price,
-                            line_dash="dot",
-                            line_color=color,
-                            annotation_text=f"{level}",
-                            annotation_position="right"
+            # --- Step 2: If Manual mode, prompt for swing points below the chart ---
+            if analysis_mode == "Manual":
+                st.subheader("Manual Swing Points")
+                with st.form("manual_swings_form"):
+                    manual_high = st.number_input("Swing High Price", value=float(swing_high), step=0.01, min_value=0.0)
+                    manual_low = st.number_input("Swing Low Price", value=float(swing_low), step=0.01, min_value=0.0)
+                    submitted = st.form_submit_button("Update with Manual Swings")
+                if submitted:
+                    if manual_high is not None and manual_low is not None and manual_high > manual_low > 0:
+                        fib_levels_manual = calculate_fib_levels(manual_high, manual_low)
+                        st.success(f"Manual swings | High: {manual_high:.2f} | Low: {manual_low:.2f}")
+                        fig_manual = go.Figure()
+                        fig_manual.add_trace(go.Candlestick(
+                            x=data.index,
+                            open=data['Open'],
+                            high=data['High'],
+                            low=data['Low'],
+                            close=data['Close'],
+                            name='Price'
+                        ))
+                        fig_manual.add_trace(go.Scatter(
+                            x=[data.index[-1]],
+                            y=[manual_high],
+                            mode='markers',
+                            marker=dict(color='green', size=12, symbol='triangle-down'),
+                            name='Swing High'
+                        ))
+                        fig_manual.add_trace(go.Scatter(
+                            x=[data.index[-1]],
+                            y=[manual_low],
+                            mode='markers',
+                            marker=dict(color='red', size=12, symbol='triangle-up'),
+                            name='Swing Low'
+                        ))
+                        for level, price in fib_levels_manual.items():
+                            color = fib_colors.get(level, 'purple')
+                            fig_manual.add_hline(
+                                y=price,
+                                line_dash="dot",
+                                line_color=color,
+                                annotation_text=f"{level}",
+                                annotation_position="right"
+                            )
+                        fig_manual.update_layout(
+                            title=f"{ticker} Price with Manual Fibonacci Levels",
+                            height=700,
+                            xaxis_rangeslider_visible=False,
+                            showlegend=True
                         )
-                    fig_manual.update_layout(
-                        title=f"{ticker} Price with Manual Fibonacci Levels",
-                        height=700,
-                        xaxis_rangeslider_visible=False,
-                        showlegend=True
-                    )
-                    st.plotly_chart(fig_manual, use_container_width=True)
-                    with st.expander("📝 Fibonacci Levels (Manual)", expanded=True):
-                        fib_df_manual = pd.DataFrame.from_dict(fib_levels_manual, orient='index', columns=['Price'])
-                        st.dataframe(
-                            fib_df_manual.style.format({'Price': '{:.2f}'}),
-                            use_container_width=True
-                        )
-                        csv_manual = fib_df_manual.reset_index().to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Levels (Manual)",
-                            data=csv_manual,
-                            file_name=f"{ticker}_fib_levels_manual.csv",
-                            mime="text/csv"
-                        )
+                        st.plotly_chart(fig_manual, use_container_width=True)
+                        with st.expander("📝 Fibonacci Levels (Manual)", expanded=True):
+                            fib_df_manual = pd.DataFrame.from_dict(fib_levels_manual, orient='index', columns=['Price'])
+                            st.dataframe(
+                                fib_df_manual.style.format({'Price': '{:.2f}'}),
+                                use_container_width=True
+                            )
+                            csv_manual = fib_df_manual.reset_index().to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="📥 Download Levels (Manual)",
+                                data=csv_manual,
+                                file_name=f"{ticker}_fib_levels_manual.csv",
+                                mime="text/csv"
+                            )
+                    else:
+                        st.warning("Please enter valid manual swing points: high > low > 0.")
+        else:
+            st.error("Swing detection failed. Please adjust your lookback period or date range.")
     else:
         st.error("❌ Failed to load data. Please check:")
         st.markdown("""
