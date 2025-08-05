@@ -9,7 +9,7 @@ import hashlib
 from struct import pack
 from Crypto.Util.number import bytes_to_long
 from Crypto.Cipher import AES
-from Cryptodome.Util import Counter
+from Crypto.Util import Counter
 from mtkclient.Library.utils import LogBase, logsetup
 
 Lcs = 0xA
@@ -1542,5 +1542,6 @@ if __name__ == "__main__":
     desc = hw_desc_set_cipher_config1(desc, SepHashMode.SEP_HASH_SHA256)
     desc = hw_desc_set_setup_mode(desc, SetupOp.SETUP_WRITE_STATE1)
     print(desc)
+
 
 
