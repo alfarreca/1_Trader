@@ -1,164 +1,141 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import talib  # For technical indicators
 
-# App configuration
-st.set_page_config(page_title="Financial Stock Screener", layout="wide")
+# Configure app
+st.set_page_config(page_title="Advanced Stock Screener", layout="wide")
+st.title("📈 Advanced Stock Screener with Technical Indicators")
 
-# Cache data to avoid reloading
+# Cache data to improve performance
 @st.cache_data
 def load_data(uploaded_file):
-    if uploaded_file is not None:
-        return pd.read_excel(uploaded_file)
-    return None
+    return pd.read_excel(uploaded_file)
 
 @st.cache_data
 def fetch_yfinance_data(symbols):
-    if not symbols:
-        return pd.DataFrame()
-    
-    # Get current date and date from 1 year ago
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=365)
-    
-    try:
-        data = yf.download(
-            tickers=list(symbols),
-            start=start_date.strftime('%Y-%m-%d'),
-            end=end_date.strftime('%Y-%m-%d'),
-            group_by='ticker',
-            progress=False
-        )
-        
-        # Process the data to get relevant metrics
-        results = []
-        for symbol in symbols:
-            try:
-                ticker = yf.Ticker(symbol)
-                info = ticker.info
-                
-                result = {
-                    'Symbol': symbol,
-                    'Current Price': info.get('currentPrice', info.get('regularMarketPrice', None)),
-                    '52 Week High': info.get('fiftyTwoWeekHigh', None),
-                    '52 Week Low': info.get('fiftyTwoWeekLow', None),
-                    'PE Ratio': info.get('trailingPE', None),
-                    'Market Cap': info.get('marketCap', None),
-                    'Dividend Yield': info.get('dividendYield', None) * 100 if info.get('dividendYield') else None,
-                    'Beta': info.get('beta', None),
-                    'Volume': info.get('volume', None),
-                    'Avg Volume': info.get('averageVolume', None),
-                    'Sector': info.get('sector', 'N/A'),
-                    'Industry': info.get('industry', 'N/A')
-                }
-                results.append(result)
-            except:
-                st.warning(f"Could not fetch data for {symbol}")
-                continue
-        
-        return pd.DataFrame(results)
-    except Exception as e:
-        st.error(f"Error fetching data from Yahoo Finance: {e}")
-        return pd.DataFrame()
+    data = yf.download(tickers=list(symbols), period="1y", group_by='ticker')
+    return data
+
+# Calculate RSI
+def calculate_rsi(data, window=14):
+    close_prices = data['Close']
+    delta = close_prices.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window).mean()
+    avg_loss = loss.rolling(window).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 # Main app
 def main():
-    st.title("Financial Stock Screener")
-    st.write("Upload an Excel file with stock symbols and use filters to screen stocks. Data will only be fetched from Yahoo Finance after applying filters.")
-    
     # File upload
-    uploaded_file = st.file_uploader("Upload Excel File", type=['xlsx', 'xls'])
+    uploaded_file = st.file_uploader("Upload Excel File", type=['xlsx'])
     
-    if uploaded_file is not None:
+    if uploaded_file:
         df = load_data(uploaded_file)
         
-        if df is not None:
-            st.success("File uploaded successfully!")
+        # Filters
+        st.sidebar.header("Filters")
+        selected_sector = st.sidebar.multiselect("Sector", df['Sector'].unique())
+        selected_industry = st.sidebar.multiselect("Industry", df['Industry'].unique())
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_sector:
+            filtered_df = filtered_df[filtered_df['Sector'].isin(selected_sector)]
+        if selected_industry:
+            filtered_df = filtered_df[filtered_df['Industry'].isin(selected_industry)]
             
-            # Display raw data option
-            if st.checkbox("Show raw data"):
-                st.dataframe(df)
-            
-            # Check required columns
-            required_columns = {'Symbol', 'Sector', 'Industry Group', 'Industry'}
-            if not required_columns.issubset(df.columns):
-                st.error(f"Missing required columns. Your file needs these columns: {required_columns}")
-                return
-            
-            # Create filters
-            st.sidebar.header("Filters")
-            
-            # Sector filter
-            sectors = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
-            selected_sector = st.sidebar.selectbox('Select Sector', sectors)
-            
-            # Industry Group filter (based on selected sector)
-            if selected_sector != 'All':
-                industry_groups = ['All'] + sorted(df[df['Sector'] == selected_sector]['Industry Group'].dropna().unique().tolist())
-            else:
-                industry_groups = ['All'] + sorted(df['Industry Group'].dropna().unique().tolist())
-            selected_industry_group = st.sidebar.selectbox('Select Industry Group', industry_groups)
-            
-            # Industry filter (based on selected sector and industry group)
-            if selected_sector != 'All' and selected_industry_group != 'All':
-                industries = ['All'] + sorted(df[(df['Sector'] == selected_sector) & 
-                                              (df['Industry Group'] == selected_industry_group)]['Industry'].dropna().unique().tolist())
-            elif selected_sector != 'All':
-                industries = ['All'] + sorted(df[df['Sector'] == selected_sector]['Industry'].dropna().unique().tolist())
-            elif selected_industry_group != 'All':
-                industries = ['All'] + sorted(df[df['Industry Group'] == selected_industry_group]['Industry'].dropna().unique().tolist())
-            else:
-                industries = ['All'] + sorted(df['Industry'].dropna().unique().tolist())
-            selected_industry = st.sidebar.selectbox('Select Industry', industries)
-            
-            # Apply filters
-            filtered_df = df.copy()
-            if selected_sector != 'All':
-                filtered_df = filtered_df[filtered_df['Sector'] == selected_sector]
-            if selected_industry_group != 'All':
-                filtered_df = filtered_df[filtered_df['Industry Group'] == selected_industry_group]
-            if selected_industry != 'All':
-                filtered_df = filtered_df[filtered_df['Industry'] == selected_industry]
-            
-            st.subheader("Filtered Stocks")
-            st.write(f"Found {len(filtered_df)} stocks matching your criteria")
-            
-            if not filtered_df.empty:
-                st.dataframe(filtered_df[['Symbol', 'Name', 'Sector', 'Industry Group', 'Industry']])
+        if st.button("Fetch Data"):
+            with st.spinner("Downloading market data..."):
+                symbols = filtered_df['Symbol'].tolist()
+                market_data = fetch_yfinance_data(symbols)
                 
-                # Button to fetch data
-                if st.button("Fetch Financial Data from Yahoo Finance"):
-                    with st.spinner("Fetching data from Yahoo Finance. This may take a while..."):
-                        symbols = filtered_df['Symbol'].tolist()
-                        financial_data = fetch_yfinance_data(symbols)
+                if not market_data.empty:
+                    # Display results
+                    tab1, tab2 = st.tabs(["📊 Summary", "📈 Technical Analysis"])
+                    
+                    with tab1:
+                        st.dataframe(filtered_df)
+                    
+                    with tab2:
+                        selected_stock = st.selectbox("Select Stock", symbols)
                         
-                        if not financial_data.empty:
-                            st.success("Data fetched successfully!")
+                        if selected_stock:
+                            stock_data = market_data[selected_stock]
                             
-                            # Merge with original data
-                            result_df = pd.merge(
-                                filtered_df,
-                                financial_data,
-                                on='Symbol',
-                                how='left'
+                            # Create subplots
+                            fig = make_subplots(
+                                rows=3, cols=1,
+                                shared_xaxes=True,
+                                vertical_spacing=0.05,
+                                subplot_titles=("Price with Moving Averages", "Volume", "RSI"),
+                                row_heights=[0.6, 0.2, 0.2]
                             )
                             
-                            # Display results
-                            st.dataframe(result_df)
-                            
-                            # Download button
-                            csv = result_df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="Download Results as CSV",
-                                data=csv,
-                                file_name='stock_screener_results.csv',
-                                mime='text/csv'
+                            # Price with Moving Averages
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=stock_data.index,
+                                    y=stock_data['Close'],
+                                    name='Close Price',
+                                    line=dict(color='blue')
+                                ),
+                                row=1, col=1
                             )
-                        else:
-                            st.warning("No financial data was fetched. Please check your symbols.")
-            else:
-                st.warning("No stocks match your filter criteria.")
+                            
+                            # Add moving averages
+                            for window in [20, 50]:
+                                ma = stock_data['Close'].rolling(window).mean()
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=stock_data.index,
+                                        y=ma,
+                                        name=f'{window}-day MA',
+                                        line=dict(width=1)
+                                    ),
+                                    row=1, col=1
+                                )
+                            
+                            # Volume bars
+                            fig.add_trace(
+                                go.Bar(
+                                    x=stock_data.index,
+                                    y=stock_data['Volume'],
+                                    name='Volume',
+                                    marker_color='rgba(100, 100, 255, 0.4)'
+                                ),
+                                row=2, col=1
+                            )
+                            
+                            # RSI
+                            rsi = calculate_rsi(stock_data)
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=stock_data.index,
+                                    y=rsi,
+                                    name='RSI (14)',
+                                    line=dict(color='purple')
+                                ),
+                                row=3, col=1
+                            )
+                            
+                            # Add RSI reference lines
+                            fig.add_hline(y=70, row=3, col=1, line_dash="dot", line_color="red")
+                            fig.add_hline(y=30, row=3, col=1, line_dash="dot", line_color="green")
+                            
+                            # Update layout
+                            fig.update_layout(
+                                height=800,
+                                showlegend=True,
+                                hovermode='x unified'
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
